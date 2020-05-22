@@ -4,3 +4,5 @@
     极限性能优于golang 版本的RedisShake
     当前为beta版本，如需要到生产环境，请利用从库验证后发布
 ## 欢迎issues
+## 鸣谢
+    https://github.com/alibaba/RedisShake

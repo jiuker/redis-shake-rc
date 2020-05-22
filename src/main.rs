@@ -28,7 +28,7 @@ fn main() {
     let mut source = open_tcp_conn(source_url, source_pass).unwrap();
     let mut source_c = source.try_clone().unwrap();
     let mut source_c1 = source.try_clone().unwrap();
-    let offset = pre_to_rdb(&mut source).unwrap();
+    let (offset,rdb_size) = pre_to_rdb(&mut source).unwrap();
     let source_read = BufReader::with_capacity(10*1024*1024,source);
     loader.rdbReader.raw = Rc::new(RefCell::new(source_read));
     let offset_count = Arc::new(AtomicUsize::new(offset as usize));

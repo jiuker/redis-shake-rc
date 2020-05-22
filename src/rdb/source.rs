@@ -15,7 +15,7 @@ use std::sync::{Arc, Mutex};
 use std::thread::sleep;
 use std::time::Duration;
 
-pub fn pre_to_rdb(source: &mut TcpStream) -> Result<i64, Box<dyn error::Error>> {
+pub fn pre_to_rdb(source: &mut TcpStream) -> Result<(i64,i64), Box<dyn error::Error>> {
     // 设置监听端口
     let set_port_resp = cmd_to_resp_first_line(source, vec!["replconf", "listening-port", "8083"])?;
     if !set_port_resp.eq(&String::from("+OK")) {
@@ -51,7 +51,7 @@ pub fn pre_to_rdb(source: &mut TcpStream) -> Result<i64, Box<dyn error::Error>> 
     if ch == '\n' {
     } else {
     }
-    Ok(offset)
+    Ok((offset,rdb_size))
 }
 pub fn report_offset(
     source: &mut TcpStream,

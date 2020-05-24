@@ -27,15 +27,19 @@ fn main() {
     let mut loader = Loader::new(Rc::new(RefCell::new("".as_bytes())));
     let mut source = open_tcp_conn(source_url, source_pass).unwrap();
     let mut source_c = source.try_clone().unwrap();
-    let mut source_c1 = source.try_clone().unwrap();
     let (offset,rdb_size) = pre_to_rdb(&mut source).unwrap();
 
     let mut source_read = BufReader::with_capacity(10*1024*1024, source);
-    let (pipe_reader,mut pipe_writer) = os_pipe::pipe().unwrap();
+    let (mut pipe_reader,mut pipe_writer) = os_pipe::pipe().unwrap();
 
     let mut rdb_read_count = Arc::new(AtomicUsize::new(0));
     let mut rdb_read_count_c = rdb_read_count.clone();
 
+    let is_rdb_done = Arc::new(AtomicBool::new(false));
+    let is_rdb_done_c = is_rdb_done.clone();
+    // offset
+    let offset_count = Arc::new(AtomicUsize::new(offset as usize));
+    let offset_count_c = offset_count.clone();
     spawn(move||{
         let mut p = [0; 512 * 1024];
         loop {
@@ -48,9 +52,43 @@ fn main() {
                 rrc = rrc + r_len;
                 rdb_read_count.store(rrc,Ordering::Release);
                 pipe_writer.write_all((p[0..r_len]).as_ref());
+                if rrc >= rdb_size as usize{
+                    // 现在是增量阶段，不需要写入了
+                    break
+                }
             }
         }
+        // 读取多余的也要包含进去
+        let mut rrc = rdb_read_count.load(Ordering::Acquire);
+        let mut occ = offset_count_c.load(Ordering::Acquire);
+        occ = occ + (rrc - rdb_size as usize);
+        offset_count_c.store(occ,Ordering::Release);
+        println!("停止读取RDB!");
+        loop{
+            let ird = is_rdb_done.load(Ordering::Relaxed);
+            if !ird{
+                sleep(Duration::from_millis(100))
+            }else{
+                break;
+            }
+        }
+        println!("开始读取增量!");
+        loop {
+            let r_len =match source_read.read(&mut p){
+                Ok(d)=>d,
+                Err(_) => 0,
+            };
+            if r_len != 0 {
+                let mut occ = offset_count_c.load(Ordering::Acquire);
+                occ = occ + r_len;
+                offset_count_c.store(occ,Ordering::Release);
+                pipe_writer.write_all((p[0..r_len]).as_ref());
+            }
+            // 防止空转
+            sleep(Duration::from_millis(5));
+        }
     });
+
     spawn(move||{
         // 全量阶段输出读取进度
         loop {
@@ -63,15 +101,13 @@ fn main() {
             }
         };
     });
-    loader.rdbReader.raw = Rc::new(RefCell::new(pipe_reader));
-    let offset_count = Arc::new(AtomicUsize::new(offset as usize));
-    let offset_count_c = offset_count.clone();
+    loader.rdbReader.raw = Rc::new(RefCell::new(pipe_reader.try_clone().unwrap()));
     println!("rdb头部为 {:?}", loader.Header());
     spawn(move || {
         // 上报头部
         report_offset(&mut source_c, &offset_count);
     });
     full(&mut loader, target_url, target_pass);
-    println!("全量阶段已经结束!");
-    incr(&mut source_c1, target_url, target_pass, offset_count_c);
+    is_rdb_done_c.store(true,Ordering::Release);
+    incr(&mut pipe_reader, target_url, target_pass);
 }

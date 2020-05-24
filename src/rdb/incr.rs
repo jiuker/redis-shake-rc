@@ -14,10 +14,9 @@ use std::thread::{sleep, spawn};
 use std::time::Duration;
 
 pub fn incr(
-    loader: &mut TcpStream,
+    source_reader: &mut Read,
     target_url: &str,
     target_pass: &str,
-    offset: Arc<AtomicUsize>,
 ) -> Result<(), Box<dyn Error>> {
     let (sender, receiver) = channel::<cmd_pack>();
     let mut path = format!("redis://{}/0", target_url);
@@ -37,10 +36,13 @@ pub fn incr(
         let mut print_count = 0;
         loop{
             let cabc = count_all_bytes.load(Ordering::Relaxed);
-            let scc = send_count_c.load(Ordering::Relaxed);
-            let pcc = parse_count_c.load(Ordering::Relaxed);
-            println!("[INC] parse_cmd_number:{},send_cmd_number:{},left:{} all bytes:{} byte",pcc,scc,pcc - scc,cabc);
+            let scc = send_count_c.load(Ordering::Acquire);
+            let pcc = parse_count_c.load(Ordering::Acquire);
+            println!("[INC] parse_cmd_number:{},send_cmd_number:{},left:{} all bytes:{}",pcc,scc,pcc - scc,cabc);
             print_count=(print_count + 1)% 10 ;
+            // 清零
+            send_count_c.store(0,Ordering::Release);
+            parse_count_c.store(0,Ordering::Release);
             if print_count ==0{
                 let ctb = count_ten_bytes.load(Ordering::Acquire);
                 println!("[INC] 10s bytes: {} byte",ctb);
@@ -88,28 +90,47 @@ pub fn incr(
             }
         }
     });
-    let (mut read_, mut write) = os_pipe::pipe().unwrap();
-    let mut read = BufReader::with_capacity(10 * 1024 * 1024, read_);
     // 解包
-    spawn(move || {
-        loop {
-            let mut p = [0; 1];
-            let r_len = read.read(&mut p).unwrap();
-            if r_len != 0 {
-                // 这里就是一个完整的包体
-                let mut pack = cmd_pack {
-                    cmd: vec![],
-                    full_pack: vec![],
-                };
-                if p[0] == '*' as u8 {
-                    pack.full_pack.push(p[0]);
+    loop {
+        let mut p = [0; 1];
+        let r_len = source_reader.read(&mut p).unwrap();
+        if r_len != 0 {
+            // 这里就是一个完整的包体
+            let mut pack = cmd_pack {
+                cmd: vec![],
+                full_pack: vec![],
+            };
+            if p[0] == '*' as u8 {
+                pack.full_pack.push(p[0]);
+                let mut args_num_vec = Vec::new();
+                loop {
+                    let mut p_ = [0; 1];
+                    let r_len = source_reader.read(&mut p_).unwrap();
+                    if r_len != 0 {
+                        pack.full_pack.push(p_[0]);
+                        if p_[0] == '\r' as u8 {
+                        } else if p_[0] == '\n' as u8 {
+                            break;
+                        } else {
+                            args_num_vec.push(p_[0])
+                        }
+                    }
+                }
+                let args_num = String::from_utf8(args_num_vec)
+                    .unwrap()
+                    .parse::<i32>()
+                    .unwrap();
+                for i in 0..args_num {
+                    // 先读$
                     let mut args_num_vec = Vec::new();
                     loop {
                         let mut p_ = [0; 1];
-                        let r_len = read.read(&mut p_).unwrap();
+                        let r_len = source_reader.read(&mut p_).unwrap();
                         if r_len != 0 {
                             pack.full_pack.push(p_[0]);
                             if p_[0] == '\r' as u8 {
+                            } else if p_[0] == '$' as u8 {
+                                args_num_vec.clear();
                             } else if p_[0] == '\n' as u8 {
                                 break;
                             } else {
@@ -117,70 +138,41 @@ pub fn incr(
                             }
                         }
                     }
+                    // 再读数据
                     let args_num = String::from_utf8(args_num_vec)
                         .unwrap()
                         .parse::<i32>()
                         .unwrap();
-                    for i in 0..args_num {
-                        // 先读$
-                        let mut args_num_vec = Vec::new();
-                        loop {
-                            let mut p_ = [0; 1];
-                            let r_len = read.read(&mut p_).unwrap();
-                            if r_len != 0 {
-                                pack.full_pack.push(p_[0]);
-                                if p_[0] == '\r' as u8 {
-                                } else if p_[0] == '$' as u8 {
-                                    args_num_vec.clear();
-                                } else if p_[0] == '\n' as u8 {
-                                    break;
-                                } else {
-                                    args_num_vec.push(p_[0])
-                                }
-                            }
-                        }
-                        // 再读数据
-                        let args_num = String::from_utf8(args_num_vec)
-                            .unwrap()
-                            .parse::<i32>()
-                            .unwrap();
-                        let mut p_: Vec<u8> = vec![0; (args_num + 2) as usize];
-                        read.read_exact(&mut p_).unwrap();
-                        pack.full_pack.append(p_.clone().as_mut());
-                        if i == 0 {
-                            p_.pop();
-                            p_.pop();
-                            pack.cmd = p_
-                        }
+                    let mut p_: Vec<u8> = vec![0; (args_num + 2) as usize];
+                    source_reader.read_exact(&mut p_).unwrap();
+                    pack.full_pack.append(p_.clone().as_mut());
+                    if i == 0 {
+                        p_.pop();
+                        p_.pop();
+                        pack.cmd = p_
                     }
-                    sender.send(pack);
-                    let mut pc = parse_count.load(Ordering::Acquire);
-                    pc = pc + 1;
-                    parse_count.store(pc,Ordering::Release);
-                } else {
-                    println!("unchar is {}", p[0] as char);
                 }
+
+                // 解析加1
+                let mut pc = parse_count.load(Ordering::Acquire);
+                pc = pc + 1;
+                parse_count.store(pc,Ordering::Release);
+                // 统计全部
+                let mut cabc = count_all_bytes_c.load(Ordering::Acquire);
+                cabc = cabc + pack.full_pack.len();
+                count_all_bytes_c.store(cabc,Ordering::Release);
+                // 统计10s
+                let mut ctbc = count_ten_bytes_c.load(Ordering::Acquire);
+                ctbc = ctbc + pack.full_pack.len();
+                count_ten_bytes_c.store(ctbc,Ordering::Release);
+                // 发送
+                sender.send(pack);
+            } else {
+                print!("{}", p[0] as char);
             }
         }
-    });
-    let mut p = [0; 512 * 1024];
-    loop {
-        let r_len = match loader.read(&mut p){
-            Ok(d)=>d,
-            Err(_)=>0,
-        };
-        if r_len != 0 {
-            offset_incr(&offset, r_len);
-            let mut cabc = count_all_bytes_c.load(Ordering::Acquire);
-            cabc = cabc + r_len;
-            count_all_bytes_c.store(cabc,Ordering::Release);
-            let ctb = count_ten_bytes_c.load(Ordering::Acquire);
-            count_ten_bytes_c.store(ctb+r_len,Ordering::Release);
-            write.write_all((p[0..r_len]).as_ref());
-
-        }
-        sleep(Duration::from_millis(5));
-    }
+    };
+    Ok(())
 }
 /*
 *4

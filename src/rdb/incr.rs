@@ -7,7 +7,7 @@ use std::fs::read;
 use std::io::{BufReader, Read, Write};
 use std::net::TcpStream;
 use std::ops::DerefMut;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicUsize, Ordering, AtomicPtr};
 use std::sync::mpsc::channel;
 use std::sync::Arc;
 use std::thread::{sleep, spawn};
@@ -25,6 +25,31 @@ pub fn incr(
         path.push_str(":");
         path.push_str(target_pass)
     }
+    let mut send_count = Arc::new(AtomicUsize::new(0));
+    let mut send_count_c = send_count.clone();
+    let mut parse_count = Arc::new(AtomicUsize::new(0));;
+    let mut parse_count_c = parse_count.clone();
+    let mut count_all_bytes = Arc::new(AtomicUsize::new(0));
+    let mut count_all_bytes_c = count_all_bytes.clone();
+    let mut count_ten_bytes = Arc::new(AtomicUsize::new(0));
+    let mut count_ten_bytes_c = count_ten_bytes.clone();
+    spawn(move||{
+        let mut print_count = 0;
+        loop{
+            let cabc = count_all_bytes.load(Ordering::Relaxed);
+            let scc = send_count_c.load(Ordering::Relaxed);
+            let pcc = parse_count_c.load(Ordering::Relaxed);
+            println!("[INC] parse_cmd_number:{},send_cmd_number:{},left:{} all bytes:{} byte",pcc,scc,pcc - scc,cabc);
+            print_count=(print_count + 1)% 10 ;
+            if print_count ==0{
+                let ctb = count_ten_bytes.load(Ordering::Acquire);
+                println!("[INC] 10s bytes: {} byte",ctb);
+                count_ten_bytes.store(0,Ordering::Release);
+            }
+            sleep(Duration::from_secs(1));
+        }
+    });
+    // 发送
     spawn(move || {
         let time_out = Duration::from_millis(10);
         let mut conn = Client::open(path.as_str())
@@ -46,6 +71,9 @@ pub fn incr(
                         batch_count = 0;
                         req_packed.clear();
                     }
+                    let mut sc = send_count.load(Ordering::Acquire);
+                    sc = sc + 1;
+                    send_count.store(sc,Ordering::Release);
                 }
                 Err(e) => {
                     if batch_count > 0 {
@@ -62,6 +90,7 @@ pub fn incr(
     });
     let (mut read_, mut write) = os_pipe::pipe().unwrap();
     let mut read = BufReader::with_capacity(10 * 1024 * 1024, read_);
+    // 解包
     spawn(move || {
         loop {
             let mut p = [0; 1];
@@ -125,6 +154,9 @@ pub fn incr(
                         }
                     }
                     sender.send(pack);
+                    let mut pc = parse_count.load(Ordering::Acquire);
+                    pc = pc + 1;
+                    parse_count.store(pc,Ordering::Release);
                 } else {
                     println!("unchar is {}", p[0] as char);
                 }
@@ -133,10 +165,19 @@ pub fn incr(
     });
     let mut p = [0; 512 * 1024];
     loop {
-        let r_len = loader.read(&mut p).unwrap();
+        let r_len = match loader.read(&mut p){
+            Ok(d)=>d,
+            Err(_)=>0,
+        };
         if r_len != 0 {
             offset_incr(&offset, r_len);
+            let mut cabc = count_all_bytes_c.load(Ordering::Acquire);
+            cabc = cabc + r_len;
+            count_all_bytes_c.store(cabc,Ordering::Release);
+            let ctb = count_ten_bytes_c.load(Ordering::Acquire);
+            count_ten_bytes_c.store(ctb+r_len,Ordering::Release);
             write.write_all((p[0..r_len]).as_ref());
+
         }
         sleep(Duration::from_millis(5));
     }

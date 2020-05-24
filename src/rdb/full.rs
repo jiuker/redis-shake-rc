@@ -18,6 +18,7 @@ use std::sync::Arc;
 use std::thread::{sleep, spawn};
 use std::time::{Duration, SystemTime};
 use crc64::Crc64;
+use time::{PrimitiveDateTime, Time};
 
 pub fn full(
     loader: &mut Loader,
@@ -77,13 +78,22 @@ pub fn full(
                     .query::<Value>(&mut conn)
                     .unwrap();
             } else if e.Type != RDBTypeStreamListPacks
-                && (e.Value.len() >= 1 || e.RealMemberCount != 0)
+                && (e.Value.len() >= 10*1024*1024 || e.RealMemberCount != 0)
             {
                 OverRestoreBigRdbEntry(&e, &mut conn);
             } else {
+                let mut ttlms = 0;
+                if e.ExpireAt != 0{
+                    let now = Time::now().millisecond();
+                    if now>= e.ExpireAt as u16 {
+                        ttlms = 1
+                    }else{
+                        ttlms = e.ExpireAt - now as u64
+                    }
+                }
                 match redis::cmd("RESTORE")
                     .arg(e.Key)
-                    .arg(0)
+                    .arg(ttlms)
                     .arg(e.Value)
                     .arg("REPLACE")
                     .query::<Value>(&mut conn)

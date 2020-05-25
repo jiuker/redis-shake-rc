@@ -11,7 +11,7 @@ use redis_shake_rs::rdb::source::{pre_to_rdb, report_offset};
 use std::cell::{Cell, RefCell};
 use std::error;
 use std::fs::{File, OpenOptions};
-use std::io::{Write, BufReader, Read};
+use std::io::{Write, BufReader, Read, BufWriter};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering,AtomicU64};
 use std::sync::mpsc::channel;
@@ -29,8 +29,10 @@ fn main() {
     let mut source_c = source.try_clone().unwrap();
     let (offset,rdb_size) = pre_to_rdb(&mut source).unwrap();
 
-    let mut source_read = BufReader::with_capacity(10*1024*1024, source);
+    // 带缓存的管道
     let (mut pipe_reader,mut pipe_writer) = os_pipe::pipe().unwrap();
+
+    let mut pipe_reader_buf = BufReader::with_capacity(10*1024*1024, pipe_reader);
 
     let mut rdb_read_count = Arc::new(AtomicU64::new(0));
     let mut rdb_read_count_c = rdb_read_count.clone();
@@ -43,7 +45,7 @@ fn main() {
     spawn(move||{
         let mut p = [0; 512 * 1024];
         loop {
-            let r_len =match source_read.read(&mut p){
+            let r_len =match source.read(&mut p){
                 Ok(d)=>d,
                 Err(_) => 0,
             };
@@ -71,7 +73,7 @@ fn main() {
         }
         println!("开始读取增量!");
         loop {
-            let r_len =match source_read.read(&mut p){
+            let r_len =match source.read(&mut p){
                 Ok(d)=>d,
                 Err(_) => 0,
             };
@@ -96,7 +98,7 @@ fn main() {
             }
         };
     });
-    loader.rdbReader.raw = Rc::new(RefCell::new(pipe_reader.try_clone().unwrap()));
+    loader.rdbReader.raw = Rc::new(RefCell::new(pipe_reader_buf.get_mut().try_clone().unwrap()));
     println!("rdb头部为 {:?}", loader.Header());
     spawn(move || {
         // 上报头部
@@ -104,5 +106,5 @@ fn main() {
     });
     full(&mut loader, target_url, target_pass);
     is_rdb_done_c.store(true,Ordering::Release);
-    incr(&mut pipe_reader, target_url, target_pass);
+    incr(&mut pipe_reader_buf, target_url, target_pass);
 }

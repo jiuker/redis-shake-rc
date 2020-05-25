@@ -7,7 +7,7 @@ use std::fs::read;
 use std::io::{BufReader, Read, Write};
 use std::net::TcpStream;
 use std::ops::DerefMut;
-use std::sync::atomic::{AtomicUsize, Ordering, AtomicPtr};
+use std::sync::atomic::{AtomicUsize, Ordering, AtomicPtr,AtomicU64};
 use std::sync::mpsc::channel;
 use std::sync::Arc;
 use std::thread::{sleep, spawn};
@@ -24,29 +24,29 @@ pub fn incr(
         path.push_str(":");
         path.push_str(target_pass)
     }
-    let mut send_count = Arc::new(AtomicUsize::new(0));
+    let mut send_count = Arc::new(AtomicU64::new(0));
     let mut send_count_c = send_count.clone();
-    let mut parse_count = Arc::new(AtomicUsize::new(0));;
+    let mut parse_count = Arc::new(AtomicU64::new(0));;
     let mut parse_count_c = parse_count.clone();
-    let mut count_all_bytes = Arc::new(AtomicUsize::new(0));
+    let mut count_all_bytes = Arc::new(AtomicU64::new(0));
     let mut count_all_bytes_c = count_all_bytes.clone();
-    let mut count_ten_bytes = Arc::new(AtomicUsize::new(0));
+    let mut count_ten_bytes = Arc::new(AtomicU64::new(0));
     let mut count_ten_bytes_c = count_ten_bytes.clone();
     spawn(move||{
         let mut print_count = 0;
         loop{
-            let cabc = count_all_bytes.load(Ordering::Relaxed);
-            let scc = send_count_c.load(Ordering::Acquire);
-            let pcc = parse_count_c.load(Ordering::Acquire);
+            let cabc = count_all_bytes.load(Ordering::SeqCst);
+            let scc = send_count_c.load(Ordering::SeqCst);
+            let pcc = parse_count_c.load(Ordering::SeqCst);
             println!("[INC] parse_cmd_number:{},send_cmd_number:{},left:{} all bytes:{}",pcc,scc,pcc - scc,cabc);
             print_count=(print_count + 1)% 10 ;
             // 清零
-            send_count_c.store(0,Ordering::Release);
-            parse_count_c.store(0,Ordering::Release);
+            send_count_c.store(0,Ordering::SeqCst);
+            parse_count_c.store(0,Ordering::SeqCst);
             if print_count ==0{
                 let ctb = count_ten_bytes.load(Ordering::Acquire);
                 println!("[INC] 10s bytes: {} byte",ctb);
-                count_ten_bytes.store(0,Ordering::Release);
+                count_ten_bytes.store(0,Ordering::SeqCst);
             }
             sleep(Duration::from_secs(1));
         }
@@ -73,9 +73,7 @@ pub fn incr(
                         batch_count = 0;
                         req_packed.clear();
                     }
-                    let mut sc = send_count.load(Ordering::Acquire);
-                    sc = sc + 1;
-                    send_count.store(sc,Ordering::Release);
+                    send_count.fetch_add(1,Ordering::SeqCst);
                 }
                 Err(e) => {
                     if batch_count > 0 {
@@ -154,17 +152,11 @@ pub fn incr(
                 }
 
                 // 解析加1
-                let mut pc = parse_count.load(Ordering::Acquire);
-                pc = pc + 1;
-                parse_count.store(pc,Ordering::Release);
+                parse_count.fetch_add(1,Ordering::SeqCst);
                 // 统计全部
-                let mut cabc = count_all_bytes_c.load(Ordering::Acquire);
-                cabc = cabc + pack.full_pack.len();
-                count_all_bytes_c.store(cabc,Ordering::Release);
+                count_all_bytes_c.fetch_add(pack.full_pack.len() as u64,Ordering::SeqCst);
                 // 统计10s
-                let mut ctbc = count_ten_bytes_c.load(Ordering::Acquire);
-                ctbc = ctbc + pack.full_pack.len();
-                count_ten_bytes_c.store(ctbc,Ordering::Release);
+                count_ten_bytes_c.fetch_add(pack.full_pack.len() as u64,Ordering::SeqCst);
                 // 发送
                 sender.send(pack);
             } else {
@@ -189,8 +181,4 @@ c
 pub struct cmd_pack {
     cmd: Vec<u8>,
     full_pack: Vec<u8>, // 储存完整的命令包
-}
-fn offset_incr(offset: &Arc<AtomicUsize>, incr_num: usize) {
-    let send_offset = offset.load(Ordering::Relaxed);
-    offset.store(send_offset + incr_num, Ordering::Relaxed);
 }

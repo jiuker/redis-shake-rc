@@ -13,7 +13,7 @@ use std::error;
 use std::fs::{File, OpenOptions};
 use std::io::{Write, BufReader, Read};
 use std::rc::Rc;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering,AtomicU64};
 use std::sync::mpsc::channel;
 use std::sync::{Arc, Mutex};
 use std::thread::{sleep, spawn};
@@ -32,13 +32,13 @@ fn main() {
     let mut source_read = BufReader::with_capacity(10*1024*1024, source);
     let (mut pipe_reader,mut pipe_writer) = os_pipe::pipe().unwrap();
 
-    let mut rdb_read_count = Arc::new(AtomicUsize::new(0));
+    let mut rdb_read_count = Arc::new(AtomicU64::new(0));
     let mut rdb_read_count_c = rdb_read_count.clone();
 
     let is_rdb_done = Arc::new(AtomicBool::new(false));
     let is_rdb_done_c = is_rdb_done.clone();
     // offset
-    let offset_count = Arc::new(AtomicUsize::new(offset as usize));
+    let offset_count = Arc::new(AtomicU64::new(offset as u64));
     let offset_count_c = offset_count.clone();
     spawn(move||{
         let mut p = [0; 512 * 1024];
@@ -48,21 +48,18 @@ fn main() {
                 Err(_) => 0,
             };
             if r_len != 0 {
-                let mut rrc = rdb_read_count.load(Ordering::Acquire);
-                rrc = rrc + r_len;
-                rdb_read_count.store(rrc,Ordering::Release);
+                rdb_read_count.fetch_add(r_len as u64,Ordering::SeqCst);
+                let rrc = rdb_read_count.load(Ordering::SeqCst);
                 pipe_writer.write_all((p[0..r_len]).as_ref());
-                if rrc >= rdb_size as usize{
+                if rrc >= rdb_size as u64{
                     // 现在是增量阶段，不需要写入了
                     break
                 }
             }
         }
         // 读取多余的也要包含进去
-        let mut rrc = rdb_read_count.load(Ordering::Acquire);
-        let mut occ = offset_count_c.load(Ordering::Acquire);
-        occ = occ + (rrc - rdb_size as usize);
-        offset_count_c.store(occ,Ordering::Release);
+        let mut rrc = rdb_read_count.load(Ordering::SeqCst);
+        offset_count_c.fetch_add(rrc - rdb_size as u64,Ordering::SeqCst);
         println!("停止读取RDB!");
         loop{
             let ird = is_rdb_done.load(Ordering::Relaxed);
@@ -79,9 +76,7 @@ fn main() {
                 Err(_) => 0,
             };
             if r_len != 0 {
-                let mut occ = offset_count_c.load(Ordering::Acquire);
-                occ = occ + r_len;
-                offset_count_c.store(occ,Ordering::Release);
+                offset_count_c.fetch_add(r_len as u64,Ordering::SeqCst);
                 pipe_writer.write_all((p[0..r_len]).as_ref());
             }
             // 防止空转
@@ -92,8 +87,8 @@ fn main() {
     spawn(move||{
         // 全量阶段输出读取进度
         loop {
-            let rrcc = rdb_read_count_c.load(Ordering::Relaxed);
-            if rrcc < rdb_size as usize{
+            let rrcc = rdb_read_count_c.load(Ordering::SeqCst);
+            if rrcc < rdb_size as u64{
                 println!("[RDB] total bytes:{} byte, read: {} ", rdb_size, rrcc);
                 sleep(Duration::from_secs(1))
             }else{

@@ -10,7 +10,7 @@ use std::io::{BufReader, BufWriter, Read, Write};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpStream};
 use std::ops::Add;
 use std::rc::Rc;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering,AtomicU64};
 use std::sync::{Arc, Mutex};
 use std::thread::sleep;
 use std::time::Duration;
@@ -55,14 +55,11 @@ pub fn pre_to_rdb(source: &mut TcpStream) -> Result<(i64,i64), Box<dyn error::Er
 }
 pub fn report_offset(
     source: &mut TcpStream,
-    offset: &Arc<AtomicUsize>,
+    offset: &Arc<AtomicU64>,
 ) -> Result<(), Box<dyn error::Error>> {
     // 上报发送的offset
     loop {
-        let send_offset;
-        {
-            send_offset = offset.load(Ordering::Relaxed);
-        }
+        let send_offset = offset.load(Ordering::SeqCst);
         source.write(
             cmd_to_string(vec!["replconf", "ack", format!("{}", send_offset).as_str()]).as_bytes(),
         );

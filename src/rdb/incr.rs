@@ -36,13 +36,13 @@ pub fn incr(
         let mut print_count = 0;
         loop{
             let cabc = count_all_bytes.load(Ordering::SeqCst);
-            let scc = send_count_c.load(Ordering::SeqCst);
             let pcc = parse_count_c.load(Ordering::SeqCst);
+            let scc = send_count_c.load(Ordering::SeqCst);
             println!("[INC] parse_cmd_number:{},send_cmd_number:{},left:{} all bytes:{}",pcc,scc,pcc - scc,cabc);
             print_count=(print_count + 1)% 10 ;
             // 清零
-            send_count_c.store(0,Ordering::SeqCst);
             parse_count_c.store(0,Ordering::SeqCst);
+            send_count_c.store(0,Ordering::SeqCst);
             if print_count ==0{
                 let ctb = count_ten_bytes.load(Ordering::Acquire);
                 println!("[INC] 10s bytes: {} byte",ctb);

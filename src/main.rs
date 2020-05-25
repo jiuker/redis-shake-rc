@@ -1,23 +1,23 @@
-use redis::{Client, Commands, Connection, Value};
-use redis_shake_rs::rdb::cmd::cmd_to_string;
+
+
 use redis_shake_rs::rdb::conn::open_tcp_conn;
 use redis_shake_rs::rdb::full::full;
 use redis_shake_rs::rdb::incr::incr;
 use redis_shake_rs::rdb::loader::{
-    rdbReader, BinEntry, Loader, RDBTypeStreamListPacks, RdbFlagAUX, RdbTypeQuicklist,
+    Loader
 };
-use redis_shake_rs::rdb::slice_buffer::sliceBuffer;
+
 use redis_shake_rs::rdb::source::{pre_to_rdb, report_offset};
-use std::cell::{Cell, RefCell};
-use std::error;
-use std::fs::{File, OpenOptions};
-use std::io::{Write, BufReader, Read, BufWriter};
+use std::cell::{RefCell};
+
+
+use std::io::{Write, BufReader, Read};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering,AtomicU64};
-use std::sync::mpsc::channel;
-use std::sync::{Arc, Mutex};
+
+use std::sync::{Arc};
 use std::thread::{sleep, spawn};
-use std::time::{Duration, SystemTime};
+use std::time::{Duration};
 
 fn main() {
     let source_url = "127.0.0.1:6379";
@@ -30,12 +30,12 @@ fn main() {
     let (offset,rdb_size) = pre_to_rdb(&mut source).unwrap();
 
     // 带缓存的管道
-    let (mut pipe_reader,mut pipe_writer) = os_pipe::pipe().unwrap();
+    let (pipe_reader,mut pipe_writer) = os_pipe::pipe().unwrap();
 
     let mut pipe_reader_buf = BufReader::with_capacity(10*1024*1024, pipe_reader);
 
-    let mut rdb_read_count = Arc::new(AtomicU64::new(0));
-    let mut rdb_read_count_c = rdb_read_count.clone();
+    let rdb_read_count = Arc::new(AtomicU64::new(0));
+    let rdb_read_count_c = rdb_read_count.clone();
 
     let is_rdb_done = Arc::new(AtomicBool::new(false));
     let is_rdb_done_c = is_rdb_done.clone();
@@ -52,7 +52,7 @@ fn main() {
             if r_len != 0 {
                 rdb_read_count.fetch_add(r_len as u64,Ordering::SeqCst);
                 let rrc = rdb_read_count.load(Ordering::SeqCst);
-                pipe_writer.write_all((p[0..r_len]).as_ref());
+                pipe_writer.write_all((p[0..r_len]).as_ref()).unwrap();
                 if rrc >= rdb_size as u64{
                     // 现在是增量阶段，不需要写入了
                     break
@@ -60,7 +60,7 @@ fn main() {
             }
         }
         // 读取多余的也要包含进去
-        let mut rrc = rdb_read_count.load(Ordering::SeqCst);
+        let rrc = rdb_read_count.load(Ordering::SeqCst);
         offset_count_c.fetch_add(rrc - rdb_size as u64,Ordering::SeqCst);
         println!("停止读取RDB!");
         loop{
@@ -79,7 +79,7 @@ fn main() {
             };
             if r_len != 0 {
                 offset_count_c.fetch_add(r_len as u64,Ordering::SeqCst);
-                pipe_writer.write_all((p[0..r_len]).as_ref());
+                pipe_writer.write_all((p[0..r_len]).as_ref()).unwrap();
             }
             // 防止空转
             sleep(Duration::from_millis(5));

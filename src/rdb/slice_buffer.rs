@@ -1,6 +1,6 @@
 use std::convert::TryFrom;
 use std::error::Error;
-use std::fs::copy;
+
 
 pub struct sliceBuffer {
     pub(crate) s: Vec<u8>,

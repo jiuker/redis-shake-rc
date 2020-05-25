@@ -1,14 +1,14 @@
 use crate::rdb::slice_buffer::sliceBuffer;
 use byteorder::{LittleEndian, WriteBytesExt};
 use crc64::Crc64;
-use std::borrow::Borrow;
-use std::cell::{Cell, RefCell};
+
+use std::cell::{RefCell};
 use std::convert::TryFrom;
 use std::error::Error;
 use std::f32::INFINITY;
 use std::f64::{NAN, NEG_INFINITY};
-use std::io::{BufReader, Read, Write};
-use std::ops::Deref;
+use std::io::{Read, Write};
+
 use std::rc::Rc;
 
 pub struct Loader {
@@ -313,7 +313,7 @@ impl rdbReader {
         }
         if (header >> 6) as u8 == rdbZiplist32bitlenString {
             let lenBytes = buf.Slice(4)?;
-            return Ok((buf.Slice(self.u32big(lenBytes.as_ref()) as i32)?));
+            return Ok(buf.Slice(self.u32big(lenBytes.as_ref()) as i32)?);
         }
         if header == rdbZiplistInt16 as u8 {
             let intBytes = buf.Slice(2)?;
@@ -328,7 +328,7 @@ impl rdbReader {
             return Ok(format!("{}", self.u64(intBytes.as_slice())).into_bytes());
         }
         if header == rdbZiplistInt24 as u8 {
-            let mut intBytes_ = [0 as u8; 3];
+            let intBytes_ = [0 as u8; 3];
             buf.Read(&mut intBytes_.to_vec());
             let mut intBytes = [0 as u8;4];
             let mut index = 0;
@@ -572,7 +572,7 @@ impl rdbReader {
                 lr.remainMember = 0;
                 lr.totMemberCount = 0;
                 let n = lr.ReadLength()?;
-                for i in 0..n {
+                for _i in 0..n {
                     lr.ReadString()?;
                 }
             }
@@ -581,7 +581,7 @@ impl rdbReader {
                 lr.remainMember = 0;
                 lr.totMemberCount = 0;
                 let n = lr.ReadLength()?;
-                for i in 0..n {
+                for _i in 0..n {
                     lr.ReadString()?;
                     if t == RdbTypeZSet2 {
                         lr.ReadDouble()?;
@@ -744,7 +744,7 @@ pub fn lzfDecompress(in_data: &Vec<u8>, outlen: usize) -> Result<Vec<u8>, Box<dy
 }
 
 fn rdbLoadCheckModuleValue(l: &mut Loader) -> Result<(), Box<dyn Error>> {
-    let opcode: u32 = 0;
+    let _opcode: u32 = 0;
     loop {
         let opcode = l.rdbReader.ReadLength()?;
         if opcode == rdbModuleOpcodeEof {

@@ -1,12 +1,12 @@
-use crate::rdb::cmd::cmd_to_string;
-use crate::rdb::loader::Loader;
+
+
 use redis::{Client, ConnectionLike};
-use std::convert::TryFrom;
+
 use std::error::Error;
-use std::fs::read;
+
 use std::io::{BufReader, Read, Write};
-use std::net::TcpStream;
-use std::ops::DerefMut;
+
+
 use std::sync::atomic::{AtomicUsize, Ordering, AtomicPtr,AtomicU64};
 use std::sync::mpsc::channel;
 use std::sync::Arc;
@@ -14,7 +14,7 @@ use std::thread::{sleep, spawn};
 use std::time::Duration;
 
 pub fn incr(
-    source_reader: &mut Read,
+    source_reader: &mut dyn Read,
     target_url: &str,
     target_pass: &str,
 ) -> Result<(), Box<dyn Error>> {
@@ -24,14 +24,14 @@ pub fn incr(
         path.push_str(":");
         path.push_str(target_pass)
     }
-    let mut send_count = Arc::new(AtomicU64::new(0));
-    let mut send_count_c = send_count.clone();
-    let mut parse_count = Arc::new(AtomicU64::new(0));;
-    let mut parse_count_c = parse_count.clone();
-    let mut count_all_bytes = Arc::new(AtomicU64::new(0));
-    let mut count_all_bytes_c = count_all_bytes.clone();
-    let mut count_ten_bytes = Arc::new(AtomicU64::new(0));
-    let mut count_ten_bytes_c = count_ten_bytes.clone();
+    let send_count = Arc::new(AtomicU64::new(0));
+    let send_count_c = send_count.clone();
+    let parse_count = Arc::new(AtomicU64::new(0));;
+    let parse_count_c = parse_count.clone();
+    let count_all_bytes = Arc::new(AtomicU64::new(0));
+    let count_all_bytes_c = count_all_bytes.clone();
+    let count_ten_bytes = Arc::new(AtomicU64::new(0));
+    let count_ten_bytes_c = count_ten_bytes.clone();
     spawn(move||{
         let mut print_count = 0;
         loop{
@@ -67,7 +67,7 @@ pub fn incr(
                     batch_count = batch_count + 1;
                     if batch_count >= 300 {
                         match conn.req_packed_commands(req_packed.as_slice(), 0, batch_count) {
-                            Ok(d) => {}
+                            Ok(_d) => {}
                             Err(e) => println!("增量阶段出现错误 {}", e),
                         };
                         batch_count = 0;
@@ -75,10 +75,10 @@ pub fn incr(
                     }
                     send_count.fetch_add(1,Ordering::SeqCst);
                 }
-                Err(e) => {
+                Err(_e) => {
                     if batch_count > 0 {
                         match conn.req_packed_commands(req_packed.as_slice(), 0, batch_count) {
-                            Ok(d) => {}
+                            Ok(_d) => {}
                             Err(e) => println!("增量阶段出现错误 {}", e),
                         };
                         batch_count = 0;

@@ -4,21 +4,21 @@ use crate::rdb::loader::{
 };
 use crate::rdb::slice_buffer::sliceBuffer;
 use redis::{Client, Connection, Value};
-use std::borrow::{Borrow, BorrowMut};
+
 use std::cell::RefCell;
 use std::error;
 use std::error::Error;
-use std::fs::OpenOptions;
+
 use std::io::Write;
 use std::ops::Add;
 use std::rc::Rc;
-use std::sync::atomic::{AtomicPtr, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::channel;
 use std::sync::Arc;
 use std::thread::{sleep, spawn};
-use std::time::{Duration, SystemTime};
+use std::time::{Duration};
 use crc64::Crc64;
-use time::{PrimitiveDateTime, Time};
+use time::{Time};
 
 pub fn full(
     loader: &mut Loader,
@@ -99,7 +99,7 @@ pub fn full(
                     .query::<Value>(&mut conn)
                     .unwrap()
                 {
-                    d => {}
+                    _d => {}
                 };
             }
             let mut sc = send_count.load(Ordering::SeqCst);
@@ -182,7 +182,7 @@ pub fn OverRestoreQuicklistEntry(
                 .query::<Value>(conn)
                 .unwrap()
             {
-                d => {}
+                _d => {}
             }
         }
     }
@@ -229,7 +229,7 @@ pub fn OverRestoreBigRdbEntry(
                     .query::<Value>(conn)
                     .unwrap()
                 {
-                    d => {}
+                    _d => {}
                 }
             }
         }
@@ -255,7 +255,7 @@ pub fn OverRestoreBigRdbEntry(
                     .query::<Value>(conn)
                     .unwrap()
                 {
-                    d => {}
+                    _d => {}
                 }
             }
         }
@@ -296,14 +296,14 @@ pub fn OverRestoreBigRdbEntry(
                     .query::<Value>(conn)
                     .unwrap()
                 {
-                    d => {}
+                    _d => {}
                 }
             }
         }
         loader::RdbTypeListZiplist => {
             let ziplist = r.ReadString()?;
             let mut buf = sliceBuffer { s: ziplist, i: 0 };
-            let mut length = r.ReadZiplistLength(&mut buf)?;
+            let length = r.ReadZiplistLength(&mut buf)?;
             println!(
                 "restore big list key {} field count {}",
                 String::from_utf8(e.Key.clone()).unwrap().as_str(),
@@ -317,7 +317,7 @@ pub fn OverRestoreBigRdbEntry(
                     .query::<Value>(conn)
                     .unwrap()
                 {
-                    d => {}
+                    _d => {}
                 }
             }
         }
@@ -325,7 +325,7 @@ pub fn OverRestoreBigRdbEntry(
             let mut length = 0;
             let ziplist = r.ReadString()?;
             let mut buf = sliceBuffer { s: ziplist, i: 0 };
-            let mut lenByte = r.ReadByte()?;
+            let lenByte = r.ReadByte()?;
             if lenByte >= 254 {
                 length = r.CountZipmapItems(&mut buf)?;
                 length = length / 2;
@@ -347,7 +347,7 @@ pub fn OverRestoreBigRdbEntry(
                     .query::<Value>(conn)
                     .unwrap()
                 {
-                    d => {}
+                    _d => {}
                 }
             }
         }
@@ -359,7 +359,7 @@ pub fn OverRestoreBigRdbEntry(
                 .query::<Value>(conn)
                 .unwrap()
             {
-                d => {}
+                _d => {}
             }
         }
         loader::RdbTypeList => {
@@ -377,7 +377,7 @@ pub fn OverRestoreBigRdbEntry(
                     .query::<Value>(conn)
                     .unwrap()
                 {
-                    d => {}
+                    _d => {}
                 }
             }
         }
@@ -396,7 +396,7 @@ pub fn OverRestoreBigRdbEntry(
                     .query::<Value>(conn)
                     .unwrap()
                 {
-                    d => {}
+                    _d => {}
                 }
             }
         }
@@ -428,7 +428,7 @@ pub fn OverRestoreBigRdbEntry(
                     .query::<Value>(conn)
                     .unwrap()
                 {
-                    d => {}
+                    _d => {}
                 }
             }
         }
@@ -459,7 +459,7 @@ pub fn OverRestoreBigRdbEntry(
                     .query::<Value>(conn)
                     .unwrap()
                 {
-                    d => {}
+                    _d => {}
                 }
             }
         }
@@ -477,7 +477,7 @@ pub fn OverRestoreBigRdbEntry(
                         .query::<Value>(conn)
                         .unwrap()
                     {
-                        d => {}
+                        _d => {}
                     }
                 }
             }

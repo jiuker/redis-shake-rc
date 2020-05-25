@@ -1,17 +1,17 @@
 use crate::rdb::cmd::{cmd_to_resp_first_line, cmd_to_string, read_line};
-use crate::rdb::loader::rdbReader;
+
 use byteorder::ReadBytesExt;
-use redis::{Client, Value};
-use std::cell::RefCell;
+
+
 use std::convert::TryFrom;
 use std::error;
-use std::fmt::Error;
-use std::io::{BufReader, BufWriter, Read, Write};
-use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpStream};
-use std::ops::Add;
-use std::rc::Rc;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering,AtomicU64};
-use std::sync::{Arc, Mutex};
+
+use std::io::{Write};
+use std::net::{TcpStream};
+
+
+use std::sync::atomic::{Ordering,AtomicU64};
+use std::sync::{Arc};
 use std::thread::sleep;
 use std::time::Duration;
 
@@ -25,7 +25,7 @@ pub fn pre_to_rdb(source: &mut TcpStream) -> Result<(i64,i64), Box<dyn error::Er
 
     source.write(cmd_to_string(vec!["psync", "?", "-1"]).as_bytes())?;
     // psync ? -1
-    let mut header = cmd_to_resp_first_line(source, vec!["psync", "?", "-1"])?;
+    let header = cmd_to_resp_first_line(source, vec!["psync", "?", "-1"])?;
     let mut resp = String::new();
     let mut uuid = String::new();
     let mut offset = 0;
@@ -62,7 +62,7 @@ pub fn report_offset(
         let send_offset = offset.load(Ordering::SeqCst);
         source.write(
             cmd_to_string(vec!["replconf", "ack", format!("{}", send_offset).as_str()]).as_bytes(),
-        );
+        ).unwrap();
         sleep(Duration::from_secs(1));
     }
     Ok(())

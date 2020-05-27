@@ -7,7 +7,7 @@ use redis_shake_rs::rdb::loader::{
     Loader
 };
 
-use redis_shake_rs::rdb::source::{pre_to_rdb, report_offset};
+use redis_shake_rs::rdb::source::{pre_to_rdb, report_offset, pre_to_inc};
 use std::cell::{RefCell};
 
 
@@ -25,9 +25,9 @@ fn main() {
     let target_url = "127.0.0.1:6400";
     let target_pass  = "";
     let mut loader = Loader::new(Rc::new(RefCell::new("".as_bytes())));
+
     let mut source = open_tcp_conn(source_url, source_pass).unwrap();
-    let mut source_c = source.try_clone().unwrap();
-    let (offset,rdb_size) = pre_to_rdb(&mut source).unwrap();
+    let (offset,rdb_size,uuid) = pre_to_rdb(&mut source).unwrap();
 
     // 带缓存的管道
     let (pipe_reader,mut pipe_writer) = os_pipe::pipe().unwrap();
@@ -42,12 +42,23 @@ fn main() {
     // offset
     let offset_count = Arc::new(AtomicU64::new(offset as u64));
     let offset_count_c = offset_count.clone();
+    // 读取源端数据
     spawn(move||{
+        let mut source_c = source.try_clone().unwrap();
+        spawn(move || {
+            // 上报头部
+            loop{
+                report_offset(&mut source_c, &offset_count);
+            };
+        });
         let mut p = [0; 512 * 1024];
         loop {
             let r_len =match source.read(&mut p){
                 Ok(d)=>d,
-                Err(_) => 0,
+                Err(e) => {
+                    println!("source tcp error {}",e);
+                    0
+                },
             };
             if r_len != 0 {
                 rdb_read_count.fetch_add(r_len as u64,Ordering::SeqCst);
@@ -75,7 +86,7 @@ fn main() {
         loop {
             let r_len =match source.read(&mut p){
                 Ok(d)=>d,
-                Err(_) => 0,
+                Err(e) =>0,
             };
             if r_len != 0 {
                 offset_count_c.fetch_add(r_len as u64,Ordering::SeqCst);
@@ -85,9 +96,8 @@ fn main() {
             sleep(Duration::from_millis(5));
         }
     });
-
+    // 全量阶段输出读取进度
     spawn(move||{
-        // 全量阶段输出读取进度
         loop {
             let rrcc = rdb_read_count_c.load(Ordering::SeqCst);
             if rrcc < rdb_size as u64{
@@ -100,10 +110,6 @@ fn main() {
     });
     loader.rdbReader.raw = Rc::new(RefCell::new(pipe_reader_buf.get_mut().try_clone().unwrap()));
     println!("rdb头部为 {:?}", loader.Header());
-    spawn(move || {
-        // 上报头部
-        report_offset(&mut source_c, &offset_count);
-    });
     full(&mut loader, target_url, target_pass);
     is_rdb_done_c.store(true,Ordering::Release);
     incr(&mut pipe_reader_buf, target_url, target_pass);

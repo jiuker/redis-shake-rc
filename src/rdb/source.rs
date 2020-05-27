@@ -15,7 +15,7 @@ use std::sync::{Arc};
 use std::thread::sleep;
 use std::time::Duration;
 
-pub fn pre_to_rdb(source: &mut TcpStream) -> Result<(i64,i64), Box<dyn error::Error>> {
+pub fn pre_to_rdb(source: &mut TcpStream) -> Result<(i64,i64,String), Box<dyn error::Error>> {
     // 设置监听端口
     let set_port_resp = cmd_to_resp_first_line(source, vec!["replconf", "listening-port", "8083"])?;
     if !set_port_resp.eq(&String::from("+OK")) {
@@ -51,8 +51,46 @@ pub fn pre_to_rdb(source: &mut TcpStream) -> Result<(i64,i64), Box<dyn error::Er
     if ch == '\n' {
     } else {
     }
-    Ok((offset,rdb_size))
+    Ok((offset,rdb_size,uuid))
 }
+
+pub fn pre_to_inc(source: &mut TcpStream,uuid:&str,offset:&str) -> Result<(), Box<dyn error::Error>> {
+    // 设置监听端口
+    let set_port_resp = cmd_to_resp_first_line(source, vec!["replconf", "listening-port", "8083"])?;
+    if !set_port_resp.eq(&String::from("+OK")) {
+        return Err(Box::try_from("设置监听端口失败").unwrap());
+    }
+    println!("set listening-port is {}", set_port_resp);
+
+    source.write(cmd_to_string(vec!["psync", "?", "-1"]).as_bytes())?;
+    // psync ? -1
+    let header = cmd_to_resp_first_line(source, vec!["psync", "?", "-1"])?;
+    let mut resp = String::new();
+    let mut uuid = String::new();
+    let mut offset = 0;
+    let mut index = 0;
+    println!("inc header");
+    for s_str in header.split(" ") {
+        if index == 0 {
+            resp = String::from(s_str);
+        }
+        if index == 1 {
+            uuid = String::from(s_str);
+        }
+        if index == 2 {
+            offset = String::from(s_str).parse::<i64>().unwrap();
+        }
+        index = index + 1;
+    }
+    println!("uuid   is {} \r\noffset is {}", uuid, offset);
+    // ignore \n
+    let ch = source.read_u8().unwrap() as char;
+    if ch == '\n' {
+    } else {
+    }
+    Ok(())
+}
+
 pub fn report_offset(
     source: &mut TcpStream,
     offset: &Arc<AtomicU64>,
@@ -62,7 +100,7 @@ pub fn report_offset(
         let send_offset = offset.load(Ordering::SeqCst);
         source.write(
             cmd_to_string(vec!["replconf", "ack", format!("{}", send_offset).as_str()]).as_bytes(),
-        ).unwrap();
+        )?;
         sleep(Duration::from_secs(1));
     }
     Ok(())

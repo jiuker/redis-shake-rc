@@ -23,7 +23,6 @@ pub fn pre_to_rdb(source: &mut TcpStream) -> Result<(i64,i64,String), Box<dyn er
     }
     println!("set listening-port is {}", set_port_resp);
 
-    source.write(cmd_to_string(vec!["psync", "?", "-1"]).as_bytes())?;
     // psync ? -1
     let header = cmd_to_resp_first_line(source, vec!["psync", "?", "-1"])?;
     let mut resp = String::new();
@@ -61,10 +60,8 @@ pub fn pre_to_inc(source: &mut TcpStream,uuid:&str,offset:&str) -> Result<(), Bo
         return Err(Box::try_from("设置监听端口失败").unwrap());
     }
     println!("set listening-port is {}", set_port_resp);
-
-    source.write(cmd_to_string(vec!["psync", "?", "-1"]).as_bytes())?;
     // psync ? -1
-    let header = cmd_to_resp_first_line(source, vec!["psync", "?", "-1"])?;
+    let header = cmd_to_resp_first_line(source, vec!["psync", uuid, offset])?;
     let mut resp = String::new();
     let mut uuid = String::new();
     let mut offset = 0;

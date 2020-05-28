@@ -51,7 +51,6 @@ fn main() {
             loop{
                 if let Err(e) = report_offset(&mut source_c, &offset_count) {
                     println!("write err is {}",e.to_string());
-                    source_c.shutdown(Shutdown::Read).unwrap();
                     break;
                 };
             };
@@ -99,6 +98,22 @@ fn main() {
             if r_len != 0 {
                 offset_count_c.fetch_add(r_len as u64,Ordering::SeqCst);
                 pipe_writer.write_all((p[0..r_len]).as_ref()).unwrap();
+            }else{
+                // todo
+                // 没有读取到,只有错误的时候没有读取到?
+                source = open_tcp_conn(source_url, source_pass).unwrap();
+                pre_to_inc(&mut source, uuid.as_ref(), format!("{}", offset_count_c.load(Ordering::SeqCst)+1).as_ref());
+                let offset_count_c_1 = offset_count_c.clone();
+                let mut source_c = source.try_clone().unwrap();
+                spawn(move || {
+                    // 上报头部
+                    loop{
+                        if let Err(e) = report_offset(&mut source_c, &offset_count_c_1) {
+                            println!("write err is {}",e.to_string());
+                            break;
+                        };
+                    };
+                });
             }
             // 防止空转
             sleep(Duration::from_millis(5));

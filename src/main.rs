@@ -18,6 +18,7 @@ use std::sync::atomic::{AtomicBool, Ordering,AtomicU64};
 use std::sync::{Arc};
 use std::thread::{sleep, spawn};
 use std::time::{Duration};
+use std::net::Shutdown;
 
 fn main() {
     let source_url = "127.0.0.1:6379";
@@ -48,7 +49,11 @@ fn main() {
         spawn(move || {
             // 上报头部
             loop{
-                report_offset(&mut source_c, &offset_count);
+                if let Err(e) = report_offset(&mut source_c, &offset_count) {
+                    println!("write err is {}",e.to_string());
+                    source_c.shutdown(Shutdown::Read).unwrap();
+                    break;
+                };
             };
         });
         let mut p = [0; 512 * 1024];

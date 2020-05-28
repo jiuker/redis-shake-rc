@@ -86,7 +86,10 @@ fn main() {
         loop {
             let r_len =match source.read(&mut p){
                 Ok(d)=>d,
-                Err(e) =>0,
+                Err(e) =>{
+                    println!("source tcp error {}",e);
+                    0
+                },
             };
             if r_len != 0 {
                 offset_count_c.fetch_add(r_len as u64,Ordering::SeqCst);

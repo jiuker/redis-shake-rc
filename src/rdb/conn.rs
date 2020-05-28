@@ -19,5 +19,7 @@ pub fn open_tcp_conn(url: &str, pass: &str) -> Result<TcpStream, Box<dyn Error>>
     source.set_read_timeout(Some(Duration::from_secs(30)))?;
     source.set_recv_buffer_size(10 * 1024 * 1024)?;
     source.set_send_buffer_size(10 * 1024 * 1024)?;
+    source.set_keepalive(Some(Duration::from_secs(10)))?;
+    source.set_nonblocking(false)?;
     Ok(source)
 }

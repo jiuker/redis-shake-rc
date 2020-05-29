@@ -4,6 +4,8 @@ use std::error::Error;
 use std::net::TcpStream;
 use std::time::Duration;
 use crate::utils::cmd::cmd_to_resp_first_line;
+use std::ops::Add;
+use redis::{Client, Connection};
 
 pub fn open_tcp_conn(url: &str, pass: &str) -> Result<TcpStream, Box<dyn Error>> {
     let mut source = std::net::TcpStream::connect(url)?;
@@ -22,4 +24,15 @@ pub fn open_tcp_conn(url: &str, pass: &str) -> Result<TcpStream, Box<dyn Error>>
     source.set_keepalive(Some(Duration::from_secs(10)))?;
     source.set_nonblocking(false)?;
     Ok(source)
+}
+pub fn open_redis_conn(url:&str, pass:&str, mut index: &'static str) ->Result<Connection,Box<dyn Error>>{
+    if index == ""{
+        index = "0"
+    }
+    let mut path = format!("redis://{}/{}", url,index);
+    if pass != "" {
+        path = path.add(":");
+        path = path.add(pass);
+    }
+    Ok(Client::open(path.as_str())?.get_connection()?)
 }

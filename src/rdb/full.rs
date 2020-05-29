@@ -19,6 +19,7 @@ use std::thread::{sleep, spawn};
 use std::time::{Duration};
 use crc64::Crc64;
 use time::{Time};
+use crate::utils::conn::open_redis_conn;
 
 pub fn full(
     loader: &mut Loader,
@@ -29,15 +30,7 @@ pub fn full(
     let send_count = Arc::new(AtomicUsize::new(0));
     let send_count_c = send_count.clone();
     let (sender, receiver) = channel::<BinEntry>();
-    let mut path = format!("redis://{}/0", target_url);
-    if target_pass != "" {
-        path = path.add(":");
-        path = path.add(target_pass);
-    }
-    let mut conn = Client::open(path.as_str())
-        .unwrap()
-        .get_connection()
-        .unwrap();
+    let mut conn = open_redis_conn(target_url,target_pass,"")?;
     spawn(move || {
         let mut now_db_index = 0;
         loop {

@@ -8,7 +8,7 @@ use std::io::{BufReader, Read, Write};
 
 
 use std::sync::atomic::{AtomicUsize, Ordering, AtomicPtr,AtomicU64};
-use std::sync::mpsc::channel;
+use std::sync::mpsc::{channel, sync_channel};
 use std::sync::Arc;
 use std::thread::{sleep, spawn};
 use std::time::Duration;
@@ -19,7 +19,7 @@ pub fn incr(
     target_url: &'static str,
     target_pass: &'static str,
 ) -> Result<(), Box<dyn Error>> {
-    let (sender, receiver) = channel::<cmd_pack>();
+    let (sender, receiver) = sync_channel::<cmd_pack>(20000);
     let send_count = Arc::new(AtomicU64::new(0));
     let send_count_c = send_count.clone();
     let parse_count = Arc::new(AtomicU64::new(0));;

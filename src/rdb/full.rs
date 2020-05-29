@@ -3,27 +3,27 @@ use crate::rdb::loader::{
     rdbReader, BinEntry, Loader, RDBTypeStreamListPacks, RdbFlagAUX, RdbTypeQuicklist,
 };
 use crate::rdb::slice_buffer::sliceBuffer;
-use redis::{Client, Connection, Value, Cmd};
+use redis::{Cmd};
 
 use std::cell::RefCell;
 use std::error;
 use std::error::Error;
 
 use std::io::Write;
-use std::ops::Add;
+
 use std::rc::Rc;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::mpsc::{channel, Sender};
-use std::sync::Arc;
-use std::thread::{sleep, spawn};
-use std::time::{Duration};
+
+use std::sync::mpsc::{SyncSender};
+
+use std::thread::{spawn};
+
 use crc64::Crc64;
 use time::{Time};
-use crate::utils::conn::open_redis_conn;
+
 
 pub fn full(
     loader: &mut Loader,
-    full_cmd_sender:&Sender<Cmd>
+    full_cmd_sender:&SyncSender<Cmd>
 ) -> Result<(), Box<dyn Error>> {
     let mut now_db_index = 0;
     loop {
@@ -88,7 +88,7 @@ pub fn full(
 }
 pub fn OverRestoreQuicklistEntry(
     e: &BinEntry,
-    full_cmd_sender:&Sender<Cmd>
+    full_cmd_sender:&SyncSender<Cmd>
 ) -> Result<(), Box<dyn error::Error>> {
     let (read, mut write) = os_pipe::pipe().unwrap();
     let value = e.Value.clone();
@@ -120,7 +120,7 @@ pub fn OverRestoreQuicklistEntry(
 }
 pub fn OverRestoreBigRdbEntry(
     e: &BinEntry,
-    full_cmd_sender:&Sender<Cmd>
+    full_cmd_sender:&SyncSender<Cmd>
 ) -> Result<(), Box<dyn error::Error>> {
     let (read, mut write) = os_pipe::pipe().unwrap();
     let value = e.Value.clone();

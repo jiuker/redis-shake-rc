@@ -62,10 +62,10 @@ pub fn pre_to_inc(source: &mut TcpStream,uuid:&str,offset:&str) -> Result<(), Bo
     println!("set listening-port is {}", set_port_resp);
     // psync ? -1
     let header = cmd_to_resp_first_line(source, vec!["psync", uuid, offset])?;
-    let mut resp = String::new();
-    let mut uuid = String::new();
-    let mut offset = 0;
-    let mut index = 0;
+    let _resp = String::new();
+    let _uuid = String::new();
+    let _offset = 0;
+    let _index = 0;
     if header.to_uppercase() == "+CONTINUE"{
          println!("源端重连成功!");
     }else{

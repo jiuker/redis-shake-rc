@@ -11,10 +11,10 @@ pub mod Runner {
     use std::time::Duration;
     use crate::rdb::incr::incr;
     use crate::rdb::full::full;
-    use std::sync::mpsc::{channel, RecvTimeoutError};
+    use std::sync::mpsc::{RecvTimeoutError, sync_channel};
     use redis::{Cmd, Value};
-    use std::error::Error;
-    use std::convert::TryInto;
+    
+    
     use std::process::{exit};
 
     pub fn mod_full(source_url:&'static str, source_pass:&'static str, target_url:&'static str, target_pass:&'static str){
@@ -112,13 +112,13 @@ pub mod Runner {
                                         };
                                     });
                                 },
-                                Err(e)=>{
+                                Err(_e)=>{
                                     // 增量已经无法满足了
                                     exit(1);
                                 }
                             };
                         },
-                        Err(e)=>{
+                        Err(_e)=>{
                             println!("源端redis重连失败!")
                         }
                     }
@@ -143,7 +143,7 @@ pub mod Runner {
         loader.rdbReader.raw = Rc::new(RefCell::new(pipe_reader_buf.get_mut().try_clone().unwrap()));
         println!("rdb头部为 {:?}", loader.Header());
         // 全量rdb的命令
-        let (full_cmd_sender,full_cmd_receiver) = channel::<Cmd>();
+        let (full_cmd_sender,full_cmd_receiver) = sync_channel::<Cmd>(20000);
         spawn(move || {
             let mut pipe = redis::pipe();
             let mut full_cmd_count = 0;

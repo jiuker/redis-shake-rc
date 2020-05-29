@@ -1,6 +1,6 @@
 
 
-use redis::{Client, ConnectionLike, Connection, ErrorKind};
+use redis::{ConnectionLike, Connection, ErrorKind};
 
 use std::error::Error;
 
@@ -8,7 +8,7 @@ use std::io::{BufReader, Read, Write};
 
 
 use std::sync::atomic::{AtomicUsize, Ordering, AtomicPtr,AtomicU64};
-use std::sync::mpsc::{channel, sync_channel};
+use std::sync::mpsc::{sync_channel};
 use std::sync::Arc;
 use std::thread::{sleep, spawn};
 use std::time::Duration;
@@ -62,17 +62,17 @@ pub fn incr(
                         // 选择redis的db
                         if last_select_full_pack.len()!=0{
                             match d.send_packed_command(last_select_full_pack.as_ref()){
-                                Ok(d1)=>{
+                                Ok(_d1)=>{
                                     print!("重新目的端redis");
                                 },
-                                Err(e)=>{
+                                Err(_e)=>{
                                     continue
                                 }
                             }
                         }
                         d
                     },
-                    Err(e)=>{
+                    Err(_e)=>{
                         sleep(Duration::from_secs(1));
                         continue
                     }
@@ -86,10 +86,10 @@ pub fn incr(
                         // 先查看是不是select
                         if String::from_utf8_lossy(cmd.cmd.as_ref()).to_lowercase().eq("select"){
                             match String::from_utf8(cmd.full_pack.clone()){
-                                Ok(d)=>{
+                                Ok(_d)=>{
                                     last_select_full_pack = cmd.full_pack.clone()
                                 },
-                                Err(e)=>{
+                                Err(_e)=>{
                                     println!("select error?")
                                 }
                             }

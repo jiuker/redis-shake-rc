@@ -62,7 +62,9 @@ pub fn incr(
                         // 选择redis的db
                         if last_select_full_pack.len()!=0{
                             match d.send_packed_command(last_select_full_pack.as_ref()){
-                                Ok(d1)=>{},
+                                Ok(d1)=>{
+                                    println!("重新连接成功!");
+                                },
                                 Err(e)=>{
                                     continue
                                 }

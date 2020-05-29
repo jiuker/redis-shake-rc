@@ -4,7 +4,7 @@ use redis_shake_rs::rdb::loader::{
     Loader
 };
 
-use redis_shake_rs::rdb::source::{pre_to_rdb, report_offset, pre_to_inc};
+use redis_shake_rs::utils::source::{pre_to_rdb, report_offset, pre_to_inc};
 use std::cell::{RefCell};
 
 

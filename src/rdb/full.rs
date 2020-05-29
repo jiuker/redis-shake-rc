@@ -211,7 +211,7 @@ pub fn OverRestoreBigRdbEntry(
     match t {
         loader::RdbTypeHashZiplist => {
             let ziplist = r.ReadString()?;
-            let mut buf = sliceBuffer { s: ziplist, i: 0 };
+            let mut buf = sliceBuffer::new(ziplist);
             let mut length = r.ReadZiplistLength(&mut buf)?;
             length = length / 2;
             println!(
@@ -235,7 +235,7 @@ pub fn OverRestoreBigRdbEntry(
         }
         loader::RdbTypeZSetZiplist => {
             let ziplist = r.ReadString()?;
-            let mut buf = sliceBuffer { s: ziplist, i: 0 };
+            let mut buf = sliceBuffer::new(ziplist);
             let mut cardinality = r.ReadZiplistLength(&mut buf)?;
             cardinality = cardinality / 2;
             println!(
@@ -261,7 +261,7 @@ pub fn OverRestoreBigRdbEntry(
         }
         loader::RdbTypeSetIntset => {
             let intset = r.ReadString()?;
-            let mut buf = sliceBuffer { s: intset, i: 0 };
+            let mut buf = sliceBuffer::new(intset);
             let intSizeBytes = buf.Slice(4)?;
             let intSize = r.u32(intSizeBytes.as_slice());
             println!("intSizeBytes {:?}",intSizeBytes);
@@ -302,7 +302,7 @@ pub fn OverRestoreBigRdbEntry(
         }
         loader::RdbTypeListZiplist => {
             let ziplist = r.ReadString()?;
-            let mut buf = sliceBuffer { s: ziplist, i: 0 };
+            let mut buf = sliceBuffer::new(ziplist);
             let length = r.ReadZiplistLength(&mut buf)?;
             println!(
                 "restore big list key {} field count {}",
@@ -324,7 +324,7 @@ pub fn OverRestoreBigRdbEntry(
         loader::RdbTypeHashZipmap => {
             let mut length = 0;
             let ziplist = r.ReadString()?;
-            let mut buf = sliceBuffer { s: ziplist, i: 0 };
+            let mut buf = sliceBuffer::new(ziplist);
             let lenByte = r.ReadByte()?;
             if lenByte >= 254 {
                 length = r.CountZipmapItems(&mut buf)?;
@@ -467,7 +467,7 @@ pub fn OverRestoreBigRdbEntry(
             let n = r.ReadLength()?;
             for _ in 0..n {
                 let ziplist = r.ReadString()?;
-                let mut buf = sliceBuffer { s: ziplist, i: 0 };
+                let mut buf = sliceBuffer::new(ziplist);
                 let zln = r.ReadLength()?;
                 for _ in 0..zln {
                     let entry = r.ReadZiplistEntry(&mut buf)?;

@@ -1,6 +1,3 @@
-
-
-use redis_shake_rs::rdb::conn::open_tcp_conn;
 use redis_shake_rs::rdb::full::full;
 use redis_shake_rs::rdb::incr::incr;
 use redis_shake_rs::rdb::loader::{
@@ -19,6 +16,7 @@ use std::sync::{Arc};
 use std::thread::{sleep, spawn};
 use std::time::{Duration};
 use std::net::Shutdown;
+use redis_shake_rs::utils::conn::open_tcp_conn;
 
 fn main() {
     let source_url = "127.0.0.1:6379";

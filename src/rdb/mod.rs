@@ -1,5 +1,3 @@
-pub mod cmd;
-pub mod conn;
 pub mod full;
 pub mod incr;
 pub mod loader;

@@ -1,9 +1,9 @@
-use crate::rdb::cmd::cmd_to_resp_first_line;
 use net2::TcpStreamExt;
 use std::convert::TryFrom;
 use std::error::Error;
 use std::net::TcpStream;
 use std::time::Duration;
+use crate::utils::cmd::cmd_to_resp_first_line;
 
 pub fn open_tcp_conn(url: &str, pass: &str) -> Result<TcpStream, Box<dyn Error>> {
     let mut source = std::net::TcpStream::connect(url)?;

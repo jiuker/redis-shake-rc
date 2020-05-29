@@ -3,7 +3,7 @@ use crate::rdb::loader::{
     rdbReader, BinEntry, Loader, RDBTypeStreamListPacks, RdbFlagAUX, RdbTypeQuicklist,
 };
 use crate::rdb::slice_buffer::sliceBuffer;
-use redis::{Client, Connection, Value};
+use redis::{Client, Connection, Value, Cmd};
 
 use std::cell::RefCell;
 use std::error;
@@ -13,7 +13,7 @@ use std::io::Write;
 use std::ops::Add;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::mpsc::channel;
+use std::sync::mpsc::{channel, Sender};
 use std::sync::Arc;
 use std::thread::{sleep, spawn};
 use std::time::{Duration};
@@ -23,83 +23,9 @@ use crate::utils::conn::open_redis_conn;
 
 pub fn full(
     loader: &mut Loader,
-    target_url: &str,
-    target_pass: &str,
+    full_cmd_sender:&Sender<Cmd>
 ) -> Result<(), Box<dyn Error>> {
-    let mut parse_count = 0;
-    let send_count = Arc::new(AtomicUsize::new(0));
-    let send_count_c = send_count.clone();
-    let (sender, receiver) = channel::<BinEntry>();
-    let mut conn = open_redis_conn(target_url,target_pass,"")?;
-    spawn(move || {
-        let mut now_db_index = 0;
-        loop {
-            let e = match receiver.recv() {
-                Ok(d) => d,
-                Err(e) => {
-                    println!("err is {}", e);
-                    break;
-                }
-            };
-            // 切换DB
-            if now_db_index != e.DB {
-                now_db_index = e.DB;
-                redis::cmd("SELECT")
-                    .arg(e.DB)
-                    .query::<Value>(&mut conn)
-                    .unwrap();
-            };
-            if e.Type == RdbTypeQuicklist {
-                redis::cmd("DEL")
-                    .arg(e.Key.clone())
-                    .query::<Value>(&mut conn)
-                    .unwrap();
-                OverRestoreQuicklistEntry(&e, &mut conn);
-                if e.ExpireAt != 0 {
-                    redis::cmd("EXPIREAT")
-                        .arg(e.Key.clone())
-                        .arg(e.ExpireAt)
-                        .query::<Value>(&mut conn)
-                        .unwrap();
-                }
-            } else if e.Type == RdbFlagAUX
-                && String::from_utf8_lossy(e.Key.clone().as_slice()).eq("lua")
-            {
-                redis::cmd("SCRIPT")
-                    .arg("load")
-                    .arg(e.Value)
-                    .query::<Value>(&mut conn)
-                    .unwrap();
-            } else if e.Type != RDBTypeStreamListPacks
-                && (e.Value.len() >= 10*1024*1024 || e.RealMemberCount != 0)
-            {
-                OverRestoreBigRdbEntry(&e, &mut conn);
-            } else {
-                let mut ttlms = 0;
-                if e.ExpireAt != 0{
-                    let now = Time::now().millisecond();
-                    if now>= e.ExpireAt as u16 {
-                        ttlms = 1
-                    }else{
-                        ttlms = e.ExpireAt - now as u64
-                    }
-                }
-                match redis::cmd("RESTORE")
-                    .arg(e.Key)
-                    .arg(ttlms)
-                    .arg(e.Value)
-                    .arg("REPLACE")
-                    .query::<Value>(&mut conn)
-                    .unwrap()
-                {
-                    _d => {}
-                };
-            }
-            let mut sc = send_count.load(Ordering::SeqCst);
-            sc = sc + 1;
-            send_count.store(sc, Ordering::SeqCst)
-        }
-    });
+    let mut now_db_index = 0;
     loop {
         let mut e = BinEntry {
             DB: 0,
@@ -114,8 +40,38 @@ pub fn full(
         };
         match loader.NextBinEntry(&mut e) {
             Ok(()) => {
-                parse_count = parse_count + 1;
-                sender.send(e);
+                // 切换DB
+                if now_db_index != e.DB {
+                    now_db_index = e.DB;
+                    full_cmd_sender.send(redis::cmd("SELECT").arg(e.DB).to_owned());
+                };
+                if e.Type == RdbTypeQuicklist {
+                    full_cmd_sender.send(redis::cmd("DEL").arg(e.Key.clone()).to_owned());
+                    OverRestoreQuicklistEntry(&e,&full_cmd_sender);
+                    if e.ExpireAt != 0 {
+                        full_cmd_sender.send( redis::cmd("EXPIREAT").arg(e.Key.clone()).arg(e.ExpireAt).to_owned());
+                    }
+                } else if e.Type == RdbFlagAUX
+                    && String::from_utf8_lossy(e.Key.clone().as_slice()).eq("lua")
+                {
+                    full_cmd_sender.send( redis::cmd("SCRIPT").arg("load").arg(e.Value).to_owned());
+                } else if e.Type != RDBTypeStreamListPacks
+                    && (e.Value.len() >= 10*1024*1024 || e.RealMemberCount != 0)
+                {
+                    OverRestoreBigRdbEntry(&e,&full_cmd_sender);
+                } else {
+                    let mut ttlms = 0;
+                    if e.ExpireAt != 0{
+                        let now = Time::now().millisecond();
+                        if now>= e.ExpireAt as u16 {
+                            ttlms = 1
+                        }else{
+                            ttlms = e.ExpireAt - now as u64
+                        }
+                    }
+                    full_cmd_sender.send(redis::cmd("DEL").arg(e.Key.clone()).to_owned());
+                    full_cmd_sender.send(redis::cmd("RESTORE").arg(e.Key).arg(ttlms).arg(e.Value).to_owned());
+                }
             }
             Err(e) => {
                 if e.to_string().eq("RDB END") {
@@ -128,22 +84,11 @@ pub fn full(
             }
         }
     }
-    loop {
-        {
-            let sc = send_count_c.load(Ordering::SeqCst);
-            if sc >= parse_count {
-                break;
-            } else {
-                println!("全量阶段，还剩下{}条发送", parse_count - sc);
-            }
-        }
-        sleep(Duration::from_secs(1));
-    }
     Ok(())
 }
 pub fn OverRestoreQuicklistEntry(
     e: &BinEntry,
-    conn: &mut Connection,
+    full_cmd_sender:&Sender<Cmd>
 ) -> Result<(), Box<dyn error::Error>> {
     let (read, mut write) = os_pipe::pipe().unwrap();
     let value = e.Value.clone();
@@ -168,22 +113,14 @@ pub fn OverRestoreQuicklistEntry(
         let zln = r.ReadZiplistLength(&mut buf)?;
         for _ in 0..zln {
             let entry = r.ReadZiplistEntry(&mut buf)?;
-            match redis::cmd("RPUSH")
-                .arg(e.Key.clone())
-                .arg(0)
-                .arg(entry)
-                .query::<Value>(conn)
-                .unwrap()
-            {
-                _d => {}
-            }
+            full_cmd_sender.send(redis::cmd("RPUSH").arg(e.Key.clone()).arg(0).arg(entry).to_owned());
         }
     }
     Ok(())
 }
 pub fn OverRestoreBigRdbEntry(
     e: &BinEntry,
-    conn: &mut Connection,
+    full_cmd_sender:&Sender<Cmd>
 ) -> Result<(), Box<dyn error::Error>> {
     let (read, mut write) = os_pipe::pipe().unwrap();
     let value = e.Value.clone();
@@ -215,15 +152,7 @@ pub fn OverRestoreBigRdbEntry(
             for _ in 0..length {
                 let filed = r.ReadZiplistEntry(&mut buf)?;
                 let value = r.ReadZiplistEntry(&mut buf)?;
-                match redis::cmd("HSET")
-                    .arg(e.Key.clone())
-                    .arg(filed)
-                    .arg(value)
-                    .query::<Value>(conn)
-                    .unwrap()
-                {
-                    _d => {}
-                }
+                full_cmd_sender.send(redis::cmd("HSET").arg(e.Key.clone()).arg(filed).arg(value).to_owned());
             }
         }
         loader::RdbTypeZSetZiplist => {
@@ -241,15 +170,7 @@ pub fn OverRestoreBigRdbEntry(
                 let scoreBytes = r.ReadZiplistEntry(&mut buf)?;
                 String::from_utf8_lossy(scoreBytes.clone().as_ref())
                     .parse::<f64>()?;
-                match redis::cmd("ZADD")
-                    .arg(e.Key.clone())
-                    .arg(scoreBytes)
-                    .arg(member)
-                    .query::<Value>(conn)
-                    .unwrap()
-                {
-                    _d => {}
-                }
+                full_cmd_sender.send(redis::cmd("ZADD").arg(e.Key.clone()).arg(scoreBytes).arg(member).to_owned());
             }
         }
         loader::RdbTypeSetIntset => {
@@ -283,14 +204,7 @@ pub fn OverRestoreBigRdbEntry(
                     }
                     _ => {}
                 }
-                match redis::cmd("SADD")
-                    .arg(e.Key.clone())
-                    .arg(intString)
-                    .query::<Value>(conn)
-                    .unwrap()
-                {
-                    _d => {}
-                }
+                full_cmd_sender.send(redis::cmd("SADD").arg(e.Key.clone()).arg(intString).to_owned());
             }
         }
         loader::RdbTypeListZiplist => {
@@ -304,14 +218,7 @@ pub fn OverRestoreBigRdbEntry(
             );
             for _ in 0..length {
                 let entry = r.ReadZiplistEntry(&mut buf)?;
-                match redis::cmd("RPUSH")
-                    .arg(e.Key.clone())
-                    .arg(entry)
-                    .query::<Value>(conn)
-                    .unwrap()
-                {
-                    _d => {}
-                }
+                full_cmd_sender.send(redis::cmd("RPUSH").arg(e.Key.clone()).arg(entry).to_owned());
             }
         }
         loader::RdbTypeHashZipmap => {
@@ -333,27 +240,12 @@ pub fn OverRestoreBigRdbEntry(
             for _ in 0..length {
                 let field = r.ReadZipmapItem(&mut buf, false)?;
                 let value = r.ReadZipmapItem(&mut buf, true)?;
-                match redis::cmd("HSET")
-                    .arg(e.Key.clone())
-                    .arg(field)
-                    .arg(value)
-                    .query::<Value>(conn)
-                    .unwrap()
-                {
-                    _d => {}
-                }
+                full_cmd_sender.send(redis::cmd("HSET").arg(e.Key.clone()).arg(field).arg(value).to_owned());
             }
         }
         loader::RdbTypeString => {
             let value = r.ReadString()?;
-            match redis::cmd("SET")
-                .arg(e.Key.clone())
-                .arg(value)
-                .query::<Value>(conn)
-                .unwrap()
-            {
-                _d => {}
-            }
+            full_cmd_sender.send(redis::cmd("SET").arg(e.Key.clone()).arg(value).to_owned());
         }
         loader::RdbTypeList => {
             let n = r.ReadLength()?;
@@ -364,14 +256,7 @@ pub fn OverRestoreBigRdbEntry(
             );
             for _ in 0..n {
                 let field = r.ReadString()?;
-                match redis::cmd("RPUSH")
-                    .arg(e.Key.clone())
-                    .arg(field)
-                    .query::<Value>(conn)
-                    .unwrap()
-                {
-                    _d => {}
-                }
+                full_cmd_sender.send(redis::cmd("RPUSH").arg(e.Key.clone()).arg(field).to_owned());
             }
         }
         loader::RdbTypeSet => {
@@ -383,14 +268,7 @@ pub fn OverRestoreBigRdbEntry(
             );
             for _ in 0..n {
                 let member = r.ReadString()?;
-                match redis::cmd("SADD")
-                    .arg(e.Key.clone())
-                    .arg(member)
-                    .query::<Value>(conn)
-                    .unwrap()
-                {
-                    _d => {}
-                }
+                full_cmd_sender.send(redis::cmd("SADD").arg(e.Key.clone()).arg(member).to_owned());
             }
         }
         loader::RdbTypeZSet | loader::RdbTypeZSet2 => {
@@ -414,15 +292,7 @@ pub fn OverRestoreBigRdbEntry(
                     score,
                     String::from_utf8(member.clone()).unwrap().as_str()
                 );
-                match redis::cmd("ZADD")
-                    .arg(e.Key.clone())
-                    .arg(score)
-                    .arg(member)
-                    .query::<Value>(conn)
-                    .unwrap()
-                {
-                    _d => {}
-                }
+                full_cmd_sender.send( redis::cmd("ZADD").arg(e.Key.clone()).arg(score).arg(member).to_owned());
             }
         }
         loader::RdbTypeHash => {
@@ -445,15 +315,7 @@ pub fn OverRestoreBigRdbEntry(
             for _ in 0..n {
                 let field = r.ReadString()?;
                 let value = r.ReadString()?;
-                match redis::cmd("HSET")
-                    .arg(e.Key.clone())
-                    .arg(field)
-                    .arg(value)
-                    .query::<Value>(conn)
-                    .unwrap()
-                {
-                    _d => {}
-                }
+                full_cmd_sender.send( redis::cmd("HSET").arg(e.Key.clone()).arg(field).arg(value).to_owned());
             }
         }
         loader::RdbTypeQuicklist => {
@@ -464,14 +326,7 @@ pub fn OverRestoreBigRdbEntry(
                 let zln = r.ReadLength()?;
                 for _ in 0..zln {
                     let entry = r.ReadZiplistEntry(&mut buf)?;
-                    match redis::cmd("RPUSH")
-                        .arg(e.Key.clone())
-                        .arg(entry)
-                        .query::<Value>(conn)
-                        .unwrap()
-                    {
-                        _d => {}
-                    }
+                    full_cmd_sender.send(redis::cmd("RPUSH").arg(e.Key.clone()).arg(entry).to_owned());
                 }
             }
         }

@@ -11,6 +11,8 @@ pub mod Runner {
     use std::time::Duration;
     use crate::rdb::incr::incr;
     use crate::rdb::full::full;
+    use std::sync::mpsc::channel;
+    use redis::Cmd;
 
     pub fn mod_full(source_url:&'static str, source_pass:&'static str, target_url:&str, target_pass:&str){
         let mut loader = Loader::new(Rc::new(RefCell::new("".as_bytes())));
@@ -121,7 +123,9 @@ pub mod Runner {
         });
         loader.rdbReader.raw = Rc::new(RefCell::new(pipe_reader_buf.get_mut().try_clone().unwrap()));
         println!("rdb头部为 {:?}", loader.Header());
-        full(&mut loader, target_url, target_pass);
+        // 全量rdb的命令
+        let (full_cmd_sender,full_cmd_receiver) = channel::<Cmd>();
+        full(&mut loader,&full_cmd_sender);
         is_rdb_done_c.store(true,Ordering::Release);
         incr(&mut pipe_reader_buf, target_url, target_pass);
     }

@@ -15,6 +15,7 @@ pub mod Runner {
     use redis::{Cmd, Value};
     use std::error::Error;
     use std::convert::TryInto;
+    use std::process::{exit};
 
     pub fn mod_full(source_url:&'static str, source_pass:&'static str, target_url:&'static str, target_pass:&'static str){
         let mut loader = Loader::new(Rc::new(RefCell::new("".as_bytes())));
@@ -94,19 +95,34 @@ pub mod Runner {
                 }else{
                     // todo
                     // 没有读取到,只有错误的时候没有读取到?
-                    source = open_tcp_conn(source_url, source_pass).unwrap();
-                    pre_to_inc(&mut source, uuid.as_ref(), format!("{}", offset_count_c.load(Ordering::SeqCst)+1).as_ref());
-                    let offset_count_c_1 = offset_count_c.clone();
-                    let mut source_c = source.try_clone().unwrap();
-                    spawn(move || {
-                        // 上报头部
-                        loop{
-                            if let Err(e) = report_offset(&mut source_c, &offset_count_c_1) {
-                                println!("write err is {}",e.to_string());
-                                break;
+                    match  open_tcp_conn(source_url, source_pass) {
+                        Ok(d)=>{
+                            source = d;
+                            match pre_to_inc(&mut source, uuid.as_ref(), format!("{}", offset_count_c.load(Ordering::SeqCst)+1).as_ref()){
+                                Ok(())=>{
+                                    let offset_count_c_1 = offset_count_c.clone();
+                                    let mut source_c = source.try_clone().unwrap();
+                                    spawn(move || {
+                                        // 上报头部
+                                        loop{
+                                            if let Err(e) = report_offset(&mut source_c, &offset_count_c_1) {
+                                                println!("write err is {}",e.to_string());
+                                                break;
+                                            };
+                                        };
+                                    });
+                                },
+                                Err(e)=>{
+                                    // 增量已经无法满足了
+                                    exit(1);
+                                }
                             };
-                        };
-                    });
+                        },
+                        Err(e)=>{
+                            println!("源端redis重连失败!")
+                        }
+                    }
+
                 }
                 // 防止空转
                 sleep(Duration::from_millis(5));

@@ -63,7 +63,7 @@ pub fn incr(
                         if last_select_full_pack.len()!=0{
                             match d.send_packed_command(last_select_full_pack.as_ref()){
                                 Ok(d1)=>{
-                                    println!("重新连接成功!");
+                                    print!("重新目的端redis");
                                 },
                                 Err(e)=>{
                                     continue
@@ -77,6 +77,7 @@ pub fn incr(
                         continue
                     }
                 };
+                println!("连接成功!");
                 break;
             }
             loop{

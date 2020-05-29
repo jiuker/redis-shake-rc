@@ -83,7 +83,7 @@ pub fn full(
                 }
             }
         }
-    }
+    };
     Ok(())
 }
 pub fn OverRestoreQuicklistEntry(

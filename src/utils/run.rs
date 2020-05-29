@@ -1,6 +1,6 @@
 pub mod Runner {
     use crate::rdb::loader::Loader;
-    use crate::utils::conn::open_tcp_conn;
+    use crate::utils::conn::{open_tcp_conn, open_redis_conn};
     use std::cell::RefCell;
     use std::rc::Rc;
     use crate::utils::source::{pre_to_rdb, pre_to_inc, report_offset};
@@ -11,10 +11,12 @@ pub mod Runner {
     use std::time::Duration;
     use crate::rdb::incr::incr;
     use crate::rdb::full::full;
-    use std::sync::mpsc::channel;
-    use redis::Cmd;
+    use std::sync::mpsc::{channel, RecvTimeoutError};
+    use redis::{Cmd, Value};
+    use std::error::Error;
+    use std::convert::TryInto;
 
-    pub fn mod_full(source_url:&'static str, source_pass:&'static str, target_url:&str, target_pass:&str){
+    pub fn mod_full(source_url:&'static str, source_pass:&'static str, target_url:&'static str, target_pass:&'static str){
         let mut loader = Loader::new(Rc::new(RefCell::new("".as_bytes())));
 
         let mut source = open_tcp_conn(source_url, source_pass).unwrap();
@@ -30,6 +32,7 @@ pub mod Runner {
 
         let is_rdb_done = Arc::new(AtomicBool::new(false));
         let is_rdb_done_c = is_rdb_done.clone();
+        let is_rdb_done_c1 = is_rdb_done_c.clone();
         // offset
         let offset_count = Arc::new(AtomicU64::new(offset as u64));
         let offset_count_c = offset_count.clone();
@@ -125,8 +128,53 @@ pub mod Runner {
         println!("rdb头部为 {:?}", loader.Header());
         // 全量rdb的命令
         let (full_cmd_sender,full_cmd_receiver) = channel::<Cmd>();
+        spawn(move || {
+            let mut pipe = redis::pipe();
+            let mut full_cmd_count = 0;
+            let mut target_conn = open_redis_conn(target_url, target_pass, "").unwrap();
+            let dur = Duration::from_secs(1);
+            loop{
+                 match full_cmd_receiver.recv_timeout(dur){
+                     Ok(cmd)=>{
+                         full_cmd_count = full_cmd_count + 1;
+                         pipe.add_command(cmd);
+                         if full_cmd_count>=300{
+                            pipe.query::<Value>(&mut target_conn).unwrap();
+                            pipe.clear();
+                            full_cmd_count = 0;
+                         }
+                     }
+                     Err(e)=>{
+                         match e {
+                             RecvTimeoutError::Timeout => {
+                                if full_cmd_count >0 {
+                                    pipe.query::<Value>(&mut target_conn).unwrap();
+                                    pipe.clear();
+                                    full_cmd_count = 0;
+                                };
+                                 // 认为rdb完成了
+                                is_rdb_done_c.store(true,Ordering::Release);
+                                break;
+                             }
+                             RecvTimeoutError::Disconnected=>{
+                                 println!("dis is {}",e);
+                             }
+                         }
+                     }
+                 };
+
+            };
+        });
         full(&mut loader,&full_cmd_sender);
-        is_rdb_done_c.store(true,Ordering::Release);
+        // 等待RDB完成命令发送
+        loop{
+            let ird = is_rdb_done_c1.load(Ordering::Relaxed);
+            if !ird{
+                sleep(Duration::from_millis(100))
+            }else{
+                break;
+            }
+        }
         incr(&mut pipe_reader_buf, target_url, target_pass);
     }
 }

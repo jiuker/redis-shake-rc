@@ -242,7 +242,57 @@ pub struct rdbReader {
     pub lastReadCount: u32,
     pub totMemberCount: u32,
 }
-
+macro_rules! read_uint {
+    ($fun_name_uint:ident,$fun_name_int:ident,$n:expr,$reslut_fun:ident,$result_type:ty,$result_type_int:ty) => (
+        pub fn $fun_name_uint(&mut self) -> Result<$result_type, Box<dyn Error>> {
+            let mut p: Vec<u8> = vec![0; $n];
+            self.raw.borrow_mut().read_exact(p.as_mut())?;
+            self.crc64.write_all(p.to_vec().as_slice());
+            if self.is_cache_buf {
+                self.buf.append(p.to_vec().as_mut());
+            }
+            Ok(self.$reslut_fun(&p))
+        }
+        pub fn $fun_name_int(&mut self)->Result<$result_type_int, Box<dyn Error>> {
+            Ok(self.$fun_name_uint()? as $result_type_int)
+        }
+    );
+}
+macro_rules! read_uint_big {
+    ($fun_name:ident,$n:expr,$reslut_fun:ident) => (
+         pub fn $fun_name(&mut self) -> Result<u32, Box<dyn Error>> {
+            let mut p = [0 as u8; $n];
+            self.raw.borrow_mut().read_exact(p.as_mut())?;
+            self.crc64.write_all(p.to_vec().as_slice());
+            if self.is_cache_buf {
+                self.buf.append(p.to_vec().as_mut());
+            }
+            Ok(self.$reslut_fun(&p))
+        }
+    );
+}
+macro_rules! base_u {
+    ($fun_name:ident,$fun_name_big:ident,$result_type:ty,$max:expr) => (
+        pub fn $fun_name(&mut self, b: &[u8]) -> $result_type {
+            let mut rsl:$result_type = 0;
+            let mut index = 0;
+            while index <= $max {
+                rsl = (b[index] as $result_type) << 8*index | rsl;
+                index = index + 1;
+            }
+            rsl
+        }
+        pub fn $fun_name_big(&mut self, b: &[u8]) -> $result_type {
+            let mut rsl:$result_type = 0;
+            let mut index = 0;
+            while index <= $max {
+                rsl = (b[($max-index)] as $result_type) << 8*index | rsl;
+                index = index + 1;
+            }
+            rsl
+        }
+    );
+}
 impl rdbReader {
     pub fn ReadZipmapItem(
         &mut self,
@@ -421,68 +471,16 @@ impl rdbReader {
         };
         Ok((length, encoded))
     }
-    pub fn readUint8(&mut self) -> Result<u8, Box<dyn Error>> {
-        Ok(self.ReadByte()?)
-    }
-    pub fn readInt8(&mut self) -> Result<i8, Box<dyn Error>> {
-        Ok(self.readUint8()? as i8)
-    }
-    pub fn readUint32BigEndian(&mut self) -> Result<u32, Box<dyn Error>> {
-        let mut p = [0 as u8; 4];
-        self.raw.borrow_mut().read_exact(p.as_mut())?;
-        self.crc64.write_all(p.to_vec().as_slice());
-        if self.is_cache_buf {
-            self.buf.append(p.to_vec().as_mut());
-        }
-        Ok(self.u32big(&p))
-    }
-    pub fn readUint64BigEndian(&mut self) -> Result<u32, Box<dyn Error>> {
-        let mut p = [0 as u8; 8];
-        self.raw.borrow_mut().read_exact(p.as_mut())?;
-        self.crc64.write_all(p.to_vec().as_slice());
-        if self.is_cache_buf {
-            self.buf.append(p.to_vec().as_mut());
-        }
-        Ok(self.u32big(&p) as u32)
-    }
-    pub fn u16big(&mut self, b: &[u8]) -> u16 {
-        return (b[1]) as u16 | ((b[0] as u16) << 8);
-    }
-    pub fn u16(&mut self, b: &[u8]) -> u16 {
-        return (b[0]) as u16 | ((b[1] as u16) << 8);
-    }
-    pub fn u32big(&mut self, b: &[u8]) -> u32 {
-        return (b[3]) as u32
-            | ((b[2] as u32) << 8)
-            | ((b[1] as u32) << 16)
-            | ((b[0] as u32) << 24);
-    }
-    pub fn u32(&mut self, b: &[u8]) -> u32 {
-        return (b[0]) as u32
-            | ((b[1] as u32) << 8)
-            | ((b[2] as u32) << 16)
-            | ((b[3] as u32) << 24);
-    }
-    pub fn u64big(&mut self, b: &[u8]) -> u64 {
-        return (b[7]) as u64
-            | ((b[6] as u64) << 8)
-            | ((b[5] as u64) << 16)
-            | ((b[4] as u64) << 24)
-            | ((b[3]) as u64) << 32
-            | ((b[2] as u64) << 40)
-            | ((b[1] as u64) << 48)
-            | ((b[0] as u64) << 56);
-    }
-    pub fn u64(&mut self, b: &[u8]) -> u64 {
-        return (b[0]) as u64
-            | ((b[1] as u64) << 8)
-            | ((b[2] as u64) << 16)
-            | ((b[3] as u64) << 24)
-            | ((b[4]) as u64) << 32
-            | ((b[5] as u64) << 40)
-            | ((b[6] as u64) << 48)
-            | ((b[7] as u64) << 56);
-    }
+    read_uint!(readUint8,readInt8,1,u8,u8,i8);
+    read_uint!(readUint16,readInt16,2,u16,u16,i16);
+    read_uint!(readUint32,readInt32,4,u32,u32,i32);
+    read_uint!(readUint64,readInt64,8,u64,u64,i64);
+    read_uint_big!(readUint32BigEndian,4,u32big);
+    read_uint_big!(readUint64BigEndian,8,u32big);
+    base_u!(u8,u8big,u8,0);
+    base_u!(u16,u16big,u16,1);
+    base_u!(u32,u32big,u32,3);
+    base_u!(u64,u64big,u64,7);
     pub fn ReadBytes(&mut self, n: usize) -> Result<Vec<u8>, Box<dyn Error>> {
         let mut p: Vec<u8> = vec![0; n];
         self.raw.borrow_mut().read_exact(&mut p)?;
@@ -491,39 +489,6 @@ impl rdbReader {
             self.buf.append(p.clone().as_mut());
         }
         Ok(p)
-    }
-    pub fn readUint16(&mut self) -> Result<u16, Box<dyn Error>> {
-        let mut p: Vec<u8> = vec![0; 2];
-        self.raw.borrow_mut().read_exact(p.as_mut())?;
-        self.crc64.write_all(p.to_vec().as_slice());
-        if self.is_cache_buf {
-            self.buf.append(p.to_vec().as_mut());
-        }
-        Ok(self.u16(&p))
-    }
-    pub fn readInt16(&mut self)->Result<i16, Box<dyn Error>> {
-        Ok(self.readUint16()? as i16)
-    }
-    pub fn readUint32(&mut self) -> Result<u32, Box<dyn Error>> {
-        let mut p: Vec<u8> = vec![0; 4];
-        self.raw.borrow_mut().read_exact(p.as_mut())?;
-        self.crc64.write_all(p.to_vec().as_slice());
-        if self.is_cache_buf {
-            self.buf.append(p.to_vec().as_mut());
-        }
-        Ok(self.u32(&p))
-    }
-    pub fn readInt32(&mut self)->Result<i32, Box<dyn Error>> {
-        Ok(self.readUint32()? as i32)
-    }
-    pub fn readUint64(&mut self) -> Result<u64, Box<dyn Error>> {
-        let mut p: Vec<u8> = vec![0; 8];
-        self.raw.borrow_mut().read_exact(p.as_mut())?;
-        self.crc64.write_all(p.to_vec().as_slice());
-        if self.is_cache_buf {
-            self.buf.append(p.to_vec().as_mut());
-        }
-        Ok(self.u64(&p))
     }
     pub fn ReadLength(&mut self) -> Result<u32, Box<dyn Error>> {
         let (length, encoded) = self.readEncodedLength()?;
@@ -674,67 +639,51 @@ impl rdbReader {
         Ok(lr.buf.clone())
     }
 }
+macro_rules! must_get {
+    ($data:ident,$i:ident) => (
+        match $data.get($i) {
+            Some(d) => *d,
+            None => {
+                return Err(Box::try_from("data not exist!")?);
+            }
+        }
+    );
+}
+macro_rules! must_get_mut {
+    ($data:ident,$i:ident) => (
+        match $data.get_mut($i) {
+            Some(d) => d,
+            None => {
+                return Err(Box::try_from("data not exist!")?);
+            }
+        }
+    );
+}
 pub fn lzfDecompress(in_data: &Vec<u8>, outlen: usize) -> Result<Vec<u8>, Box<dyn Error>> {
     let mut out: Vec<u8> = vec![0; outlen];
     let (mut i, mut o) = (0, 0);
     while i < in_data.len() {
-        let ctrl: i32 = match in_data.get(i) {
-            Some(d) => *d,
-            None => {
-                return Err(Box::try_from("in_data first not exits")?);
-            }
-        } as i32;
+        let ctrl: i32 = must_get!(in_data,i) as i32;
         i = i + 1;
         if ctrl < 32 {
             for _ in 0..=ctrl {
-                *match out.get_mut(o) {
-                    Some(d) => d,
-                    None => {
-                        return Err(Box::try_from("will set not exits")?);
-                    }
-                } = match in_data.get(i) {
-                    Some(d) => *d,
-                    None => {
-                        return Err(Box::try_from("in_data handle not exits")?);
-                    }
-                };
+                * must_get_mut!(out,o) = must_get!(in_data,i);
                 i = i + 1;
                 o = o + 1;
             }
         } else {
             let mut length = ctrl >> 5;
             if length == 7 {
-                length = length
-                    + match in_data.get(i) {
-                        Some(d) => *d,
-                        None => {
-                            return Err(Box::try_from("623 not exits")?);
-                        }
-                    } as i32;
+                length = length + must_get!(in_data,i) as i32;
                 i = i + 1;
             }
             let mut ref_d = o
                 - ((ctrl & 0x1f) << 8) as usize
-                - match in_data.get(i) {
-                    Some(d) => *d,
-                    None => {
-                        return Err(Box::try_from("633 not exits")?);
-                    }
-                } as usize
+                - must_get!(in_data,i) as usize
                 - 1;
             i = i + 1;
             for _ in 0..=(length + 1) {
-                *match out.get_mut(o) {
-                    Some(d) => d,
-                    None => {
-                        return Err(Box::try_from("642 not exits")?);
-                    }
-                } = match out.get(ref_d) {
-                    Some(d) => *d,
-                    None => {
-                        return Err(Box::try_from("647 not exits")?);
-                    }
-                };
+                * must_get_mut!(out,o) = must_get!(out,ref_d);
                 ref_d = ref_d + 1;
                 o = o + 1;
             }

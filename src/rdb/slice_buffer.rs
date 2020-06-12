@@ -13,7 +13,7 @@ impl sliceBuffer {
     }
     pub fn Slice(&mut self, n: i32) -> Result<Vec<u8>, Box<dyn Error>> {
         if (self.i + n) > self.s.len() as i32 {
-            return Err(Box::try_from("io error")?);
+            return Err(Box::from("io error"));
         };
         let mut index = self.i as usize;
         let mut rsl = vec![];
@@ -26,7 +26,7 @@ impl sliceBuffer {
     }
     pub fn ReadByte(&mut self) -> Result<u8, Box<dyn Error>> {
         if self.i >= self.s.len() as i32 {
-            return Err(Box::try_from("io error")?);
+            return Err(Box::from("io error"));
         };
         let rsl = *self.s.get(self.i as usize).unwrap();
         self.i = self.i + 1;
@@ -34,10 +34,10 @@ impl sliceBuffer {
     }
     pub fn Read(&mut self, p: &mut Vec<u8>) -> Result<usize, Box<dyn Error>> {
         if p.len() == 0 {
-            return Err(Box::try_from("nil read")?);
+            return Err(Box::from("nil read"));
         }
         if self.i >= self.s.len() as i32 {
-            return Err(Box::try_from("io error")?);
+            return Err(Box::from("io error"));
         };
         let mut index = 0 as usize;
         while index < p.len() {
@@ -58,14 +58,14 @@ impl sliceBuffer {
             }
             2 => abs = (self.s.len() + offset as usize) as i64,
             _ => {
-                return Err(Box::try_from("invalid whence")?);
+                return Err(Box::from("invalid whence"));
             }
         };
         if abs < 0 {
-            return Err(Box::try_from("negative position")?);
+            return Err(Box::from("negative position"));
         }
         if abs >= 1 << 31 {
-            return Err(Box::try_from("position out of range")?);
+            return Err(Box::from("position out of range"));
         }
         self.i = abs as i32;
         Ok(abs)

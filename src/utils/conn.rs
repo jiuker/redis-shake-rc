@@ -12,7 +12,7 @@ pub fn open_tcp_conn(url: &str, pass: &str) -> Result<TcpStream, Box<dyn Error>>
     if !pass.is_empty() {
         let auth_resp = cmd_to_resp_first_line(&mut source, vec!["auth", pass])?;
         if auth_resp.contains("ERR") {
-            return Err(Box::try_from(auth_resp)?);
+            return Err(Box::from(auth_resp));
         } else {
             println!("auth success")
         }

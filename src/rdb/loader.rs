@@ -101,7 +101,7 @@ impl Loader {
         let mut head_byt = [0 as u8; 9];
         self.readFull(&mut head_byt)?;
         if head_byt[0..5].ne("REDIS".as_bytes()) {
-            return Err(Box::try_from("不是rdb文件的header")?);
+            return Err(Box::from("不是rdb文件的header"));
         }
         let version = String::from_utf8(Vec::from(&head_byt[5..9]))?.parse::<i32>()?;
         println!("rdb version is {}", version);
@@ -120,7 +120,7 @@ impl Loader {
         let rdb_file_u64 = self.rdbReader.readUint64()?;
         if rdb_file_u64 != crc {
             println!("{},{}", rdb_file_u64, crc);
-            return Err(Box::try_from("sum校验 不一致!{}{}")?);
+            return Err(Box::from("sum校验 不一致!{}{}"));
         };
         Ok(())
     }
@@ -167,7 +167,7 @@ impl Loader {
                     self.db = dbnum
                 }
                 rdbFlagEOF => {
-                    return Err(Box::try_from("RDB END")?);
+                    return Err(Box::from("RDB END"));
                 }
                 rdbFlagModuleAux => {
                     let _ = self.rdbReader.ReadLength()?;
@@ -217,7 +217,7 @@ impl Loader {
             }
 
         }
-        return Err(Box::try_from("RDB END")?);
+        return Err(Box::from("RDB END"));
     }
 }
 #[derive(Clone, Debug)]
@@ -322,7 +322,7 @@ impl rdbReader {
                 ));
             }
             254 => {
-                return Err(Box::try_from("rdb: invalid zipmap item length")?);
+                return Err(Box::from("rdb: invalid zipmap item length"));
             }
             255 => {
                 return Ok((-1, 1));
@@ -395,7 +395,7 @@ impl rdbReader {
         if (header >> 4) as u8 == rdbZiplistInt4 {
             return Ok(format!("{}", (header & 0x0f) as i64 - 1).into_bytes());
         }
-        Err(Box::try_from("rdb: unknown ziplist header byte")?)
+        Err(Box::from("rdb: unknown ziplist header byte"))
     }
     pub fn ReadZiplistLength(&mut self, buf: &mut sliceBuffer) -> Result<i64, Box<dyn Error>> {
         buf.Seek(8, 0); // skip the zlbytes and zltail
@@ -436,7 +436,7 @@ impl rdbReader {
                 return lzfDecompress(&in_data, outlen as usize);
             }
             _ => {
-                return Err(Box::try_from("invalid encoded-string")?);
+                return Err(Box::from("invalid encoded-string"));
             }
         }
         Ok(Vec::from("".as_bytes()))
@@ -465,7 +465,7 @@ impl rdbReader {
                     length = self.readUint64BigEndian()?;
                 }
                 _ => {
-                    return Err(Box::try_from(format!("unknown encoding length {}",u))?);
+                    return Err(Box::from(format!("unknown encoding length {}",u)));
                 }
             },
         };
@@ -493,7 +493,7 @@ impl rdbReader {
     pub fn ReadLength(&mut self) -> Result<u32, Box<dyn Error>> {
         let (length, encoded) = self.readEncodedLength()?;
         if encoded {
-            return Err(Box::try_from("encoded-length")?);
+            return Err(Box::from("encoded-length"));
         };
         Ok(length)
     }
@@ -633,7 +633,7 @@ impl rdbReader {
                 }
             }
             _ => {
-                return Err(Box::try_from(format!("unknown object-type {}", t))?);
+                return Err(Box::from(format!("unknown object-type {}", t)));
             }
         };
         Ok(lr.buf.clone())
@@ -644,7 +644,7 @@ macro_rules! must_get {
         match $data.get($i) {
             Some(d) => *d,
             None => {
-                return Err(Box::try_from("data not exist!")?);
+                return Err(Box::from("data not exist!"));
             }
         }
     );
@@ -654,7 +654,7 @@ macro_rules! must_get_mut {
         match $data.get_mut($i) {
             Some(d) => d,
             None => {
-                return Err(Box::try_from("data not exist!")?);
+                return Err(Box::from("data not exist!"));
             }
         }
     );

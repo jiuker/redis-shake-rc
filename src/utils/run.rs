@@ -8,14 +8,15 @@ pub mod Runner {
     use redis::{Cmd, Value};
     use std::cell::RefCell;
     use std::io::{BufReader, Read, Write};
+    use std::ops::Sub;
+    use std::process::exit;
     use std::rc::Rc;
     use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
     use std::sync::mpsc::{sync_channel, RecvTimeoutError};
     use std::sync::Arc;
     use std::thread::{sleep, spawn};
     use std::time::Duration;
-
-    use std::process::exit;
+    use time::Time;
 
     pub fn mod_full(
         source_url: &'static str,
@@ -32,7 +33,6 @@ pub mod Runner {
         let (pipe_reader, mut pipe_writer) = os_pipe::pipe().unwrap();
 
         let mut pipe_reader_buf = BufReader::with_capacity(10 * 1024 * 1024, pipe_reader);
-
         let rdb_read_count = Arc::new(AtomicU64::new(0));
         let rdb_read_count_c = rdb_read_count.clone();
 
@@ -59,7 +59,7 @@ pub mod Runner {
                 if r_len != 0 {
                     atomic_u64_fetch_add!(rdb_read_count, r_len as u64);
                     let rrc = atomic_u64_load!(rdb_read_count);
-                    pipe_writer.write_all((p[0..r_len]).as_ref()).unwrap();
+                    pipe_writer.write_all(&p[0..r_len]).unwrap();
                     if rrc >= rdb_size as u64 {
                         // 现在是增量阶段，不需要写入了
                         break;
@@ -89,7 +89,7 @@ pub mod Runner {
                 };
                 if r_len != 0 {
                     atomic_u64_fetch_add!(offset_count_c, r_len as u64);
-                    pipe_writer.write_all((p[0..r_len]).as_ref()).unwrap();
+                    pipe_writer.write_all(&p[0..r_len]).unwrap();
                 } else {
                     // todo
                     // 没有读取到,只有错误的时候没有读取到?
@@ -124,10 +124,10 @@ pub mod Runner {
             let rrcc = atomic_u64_load!(rdb_read_count_c);
             if rrcc < rdb_size as u64 {
                 println!("[RDB] total bytes:{} byte, read: {} ", rdb_size, rrcc);
-                sleep(Duration::from_secs(1))
             } else {
                 break;
             }
+            sleep(Duration::from_secs(1))
         });
         loader.rdbReader.raw =
             Rc::new(RefCell::new(pipe_reader_buf.get_mut().try_clone().unwrap()));

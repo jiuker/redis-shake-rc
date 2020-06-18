@@ -13,13 +13,13 @@ use std::time::Duration;
 #[macro_export(atomic_u64_fetch_add)]
 macro_rules! atomic_u64_fetch_add {
     ($data:ident,$inr:expr) => {
-        $data.fetch_add($inr, Ordering::SeqCst)
+        $data.fetch_add($inr, Ordering::Relaxed)
     };
 }
 #[macro_export(atomic_u64_load)]
 macro_rules! atomic_u64_load {
     ($data:ident) => {
-        $data.load(Ordering::SeqCst);
+        $data.load(Ordering::Relaxed);
     };
 }
 macro_rules! send_cmd {

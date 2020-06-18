@@ -47,6 +47,7 @@ pub mod Runner {
             let mut source_c = source.try_clone().unwrap();
             source_report_offset!(source_c, offset_count);
             let mut p = [0; 512 * 1024];
+            // 全量的数据
             loop {
                 let r_len = match source.read(&mut p) {
                     Ok(d) => d,
@@ -65,7 +66,7 @@ pub mod Runner {
                     }
                 }
             }
-            // 读取多余的也要包含进去
+            // 如果读取多了需要上报offset
             let rrc = atomic_u64_load!(rdb_read_count);
             atomic_u64_fetch_add!(offset_count_c, rrc - rdb_size as u64);
             println!("停止读取RDB!");

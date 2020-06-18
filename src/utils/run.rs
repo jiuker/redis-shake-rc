@@ -4,7 +4,7 @@ pub mod Runner {
     use crate::rdb::loader::Loader;
     use crate::utils::conn::{open_redis_conn, open_tcp_conn};
     use crate::utils::source::{pre_to_inc, pre_to_rdb, report_offset};
-    use crate::{atomic_u64_fetch_add, atomic_u64_load};
+    use crate::{atomic_u64_fetch_add, atomic_u64_load, source_report_offset};
     use redis::{Cmd, Value};
     use std::cell::RefCell;
     use std::io::{BufReader, Read, Write};
@@ -45,15 +45,7 @@ pub mod Runner {
         // 读取源端数据
         spawn(move || {
             let mut source_c = source.try_clone().unwrap();
-            spawn(move || {
-                // 上报头部
-                loop {
-                    if let Err(e) = report_offset(&mut source_c, &offset_count) {
-                        println!("write err is {}", e.to_string());
-                        break;
-                    };
-                }
-            });
+            source_report_offset!(source_c, offset_count);
             let mut p = [0; 512 * 1024];
             loop {
                 let r_len = match source.read(&mut p) {
@@ -111,17 +103,7 @@ pub mod Runner {
                                 Ok(()) => {
                                     let offset_count_c_1 = offset_count_c.clone();
                                     let mut source_c = source.try_clone().unwrap();
-                                    spawn(move || {
-                                        // 上报头部
-                                        loop {
-                                            if let Err(e) =
-                                                report_offset(&mut source_c, &offset_count_c_1)
-                                            {
-                                                println!("write err is {}", e.to_string());
-                                                break;
-                                            };
-                                        }
-                                    });
+                                    source_report_offset!(source_c, offset_count_c_1);
                                 }
                                 Err(_e) => {
                                     // 增量已经无法满足了

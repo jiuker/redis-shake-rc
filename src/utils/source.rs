@@ -1,21 +1,18 @@
-
 use byteorder::ReadBytesExt;
-
 
 use std::convert::TryFrom;
 use std::error;
 
-use std::io::{Write};
-use std::net::{TcpStream};
+use std::io::Write;
+use std::net::TcpStream;
 
-
-use std::sync::atomic::{Ordering,AtomicU64};
-use std::sync::{Arc};
+use crate::utils::cmd::{cmd_to_resp_first_line, cmd_to_string, read_line};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 use std::thread::sleep;
 use std::time::Duration;
-use crate::utils::cmd::{cmd_to_resp_first_line, read_line, cmd_to_string};
 
-pub fn pre_to_rdb(source: &mut TcpStream) -> Result<(i64,i64,String), Box<dyn error::Error>> {
+pub fn pre_to_rdb(source: &mut TcpStream) -> Result<(i64, i64, String), Box<dyn error::Error>> {
     // 设置监听端口
     let set_port_resp = cmd_to_resp_first_line(source, vec!["replconf", "listening-port", "8083"])?;
     if !set_port_resp.eq(&String::from("+OK")) {
@@ -41,8 +38,8 @@ pub fn pre_to_rdb(source: &mut TcpStream) -> Result<(i64,i64,String), Box<dyn er
         }
         index = index + 1;
     }
-    if index!=3{
-        return Err(Box::from("未知的响应头!"))
+    if index != 3 {
+        return Err(Box::from("未知的响应头!"));
     }
     println!("uuid   is {} \r\noffset is {}", uuid, offset);
     // rdb size
@@ -53,10 +50,14 @@ pub fn pre_to_rdb(source: &mut TcpStream) -> Result<(i64,i64,String), Box<dyn er
     if ch == '\n' {
     } else {
     }
-    Ok((offset,rdb_size,uuid))
+    Ok((offset, rdb_size, uuid))
 }
 
-pub fn pre_to_inc(source: &mut TcpStream,uuid:&str,offset:&str) -> Result<(), Box<dyn error::Error>> {
+pub fn pre_to_inc(
+    source: &mut TcpStream,
+    uuid: &str,
+    offset: &str,
+) -> Result<(), Box<dyn error::Error>> {
     // 设置监听端口
     let set_port_resp = cmd_to_resp_first_line(source, vec!["replconf", "listening-port", "8083"])?;
     if !set_port_resp.eq(&String::from("+OK")) {
@@ -69,9 +70,9 @@ pub fn pre_to_inc(source: &mut TcpStream,uuid:&str,offset:&str) -> Result<(), Bo
     let _uuid = String::new();
     let _offset = 0;
     let _index = 0;
-    if header.to_uppercase() == "+CONTINUE"{
-         println!("源端重连成功!");
-    }else{
+    if header.to_uppercase() == "+CONTINUE" {
+        println!("源端重连成功!");
+    } else {
         return Err(Box::from("重连失败!"));
     }
     // ignore \n
@@ -95,4 +96,18 @@ pub fn report_offset(
         sleep(Duration::from_secs(1));
     }
     Ok(())
+}
+#[macro_export(source_report_offset)]
+macro_rules! source_report_offset {
+    ($conn:ident,$offset:ident) => {
+        spawn(move || {
+            // 上报头部
+            loop {
+                if let Err(e) = report_offset(&mut $conn, &$offset) {
+                    println!("write err is {}", e.to_string());
+                    break;
+                };
+            }
+        });
+    };
 }

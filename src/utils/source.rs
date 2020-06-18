@@ -41,6 +41,9 @@ pub fn pre_to_rdb(source: &mut TcpStream) -> Result<(i64,i64,String), Box<dyn er
         }
         index = index + 1;
     }
+    if index!=3{
+        return Err(Box::from("未知的响应头!"))
+    }
     println!("uuid   is {} \r\noffset is {}", uuid, offset);
     // rdb size
     let rdb_size = read_line(source)?.replace("$", "").parse::<i64>().unwrap();

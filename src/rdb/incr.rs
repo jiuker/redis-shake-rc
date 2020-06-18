@@ -1,18 +1,48 @@
-
-
-use redis::{ConnectionLike, Connection, ErrorKind};
+use redis::{Connection, ConnectionLike, ErrorKind};
 
 use std::error::Error;
 
 use std::io::{BufReader, Read, Write};
 
-
-use std::sync::atomic::{AtomicUsize, Ordering, AtomicPtr,AtomicU64};
-use std::sync::mpsc::{sync_channel};
+use crate::utils::conn::open_redis_conn;
+use std::sync::atomic::{AtomicPtr, AtomicU64, AtomicUsize, Ordering};
+use std::sync::mpsc::sync_channel;
 use std::sync::Arc;
 use std::thread::{sleep, spawn};
 use std::time::Duration;
-use crate::utils::conn::open_redis_conn;
+#[macro_export(atomic_u64_fetch_add)]
+macro_rules! atomic_u64_fetch_add {
+    ($data:ident,$inr:expr) => {
+        $data.fetch_add($inr, Ordering::SeqCst)
+    };
+}
+#[macro_export(atomic_u64_load)]
+macro_rules! atomic_u64_load {
+    ($data:ident) => {
+        $data.load(Ordering::SeqCst);
+    };
+}
+macro_rules! send_cmd {
+    // 连接，发送的包,发送统计，单次发送的count统计，超过多少就发送的值
+    ($conn:ident,$req_packed:ident,$send_count:ident,$batch_count:ident,$over_max_to_send:expr) => {
+        if $batch_count > $over_max_to_send {
+            match $conn.req_packed_commands($req_packed.as_slice(), 0, $batch_count) {
+                Ok(_d) => {}
+                Err(e) => match e.kind() {
+                    ErrorKind::IoError => {
+                        break;
+                    }
+                    _ => {
+                        println!("增量阶段读取响应错误:{}", e.to_string());
+                    }
+                },
+            };
+            atomic_u64_fetch_add!($send_count, $batch_count as u64);
+            $batch_count = 0;
+            $req_packed.clear();
+        }
+    };
+}
 
 pub fn incr(
     source_reader: &mut dyn Read,
@@ -22,28 +52,23 @@ pub fn incr(
     let (sender, receiver) = sync_channel::<cmd_pack>(20000);
     let send_count = Arc::new(AtomicU64::new(0));
     let send_count_c = send_count.clone();
-    let parse_count = Arc::new(AtomicU64::new(0));;
+    let parse_count = Arc::new(AtomicU64::new(0));
     let parse_count_c = parse_count.clone();
     let count_all_bytes = Arc::new(AtomicU64::new(0));
     let count_all_bytes_c = count_all_bytes.clone();
-    let count_ten_bytes = Arc::new(AtomicU64::new(0));
-    let count_ten_bytes_c = count_ten_bytes.clone();
-    spawn(move||{
-        let mut print_count = 0;
-        loop{
-            let cabc = count_all_bytes.load(Ordering::SeqCst);
-            let pcc = parse_count_c.load(Ordering::SeqCst);
-            let scc = send_count_c.load(Ordering::SeqCst);
-            println!("[INC] parse_cmd_number:{},send_cmd_number:{},left:{} all bytes:{}",pcc,scc,pcc - scc,cabc);
-            print_count=(print_count + 1)% 10 ;
+    spawn(move || {
+        loop {
+            let cabc = atomic_u64_load!(count_all_bytes);
+            let pcc = atomic_u64_load!(parse_count_c);
+            let scc = atomic_u64_load!(send_count_c);
+            println!(
+                "[INC] parse_cmd_number:{},send_cmd_number:{},left:{} all bytes:{}",
+                pcc,
+                scc,
+                pcc - scc,
+                cabc
+            );
             // 清零
-            parse_count_c.store(0,Ordering::SeqCst);
-            send_count_c.store(0,Ordering::SeqCst);
-            if print_count ==0{
-                let ctb = count_ten_bytes.load(Ordering::Acquire);
-                println!("[INC] 10s bytes: {} byte",ctb);
-                count_ten_bytes.store(0,Ordering::SeqCst);
-            }
             sleep(Duration::from_secs(1));
         }
     });
@@ -52,87 +77,51 @@ pub fn incr(
         let time_out = Duration::from_millis(10);
         let mut req_packed: Vec<u8> = vec![];
         let mut batch_count = 0;
-        let mut conn:Connection;
+        let mut conn: Connection;
         let mut last_select_full_pack = vec![];
         loop {
-            loop{
+            loop {
                 println!("连接目的端redis中...");
-                conn = match open_redis_conn(target_url,target_pass,"0"){
-                    Ok(mut d)=>{
+                conn = match open_redis_conn(target_url, target_pass, "0") {
+                    Ok(mut d) => {
                         // 选择redis的db
-                        if last_select_full_pack.len()!=0{
-                            match d.send_packed_command(last_select_full_pack.as_ref()){
-                                Ok(_d1)=>{
+                        if last_select_full_pack.len() != 0 {
+                            match d.send_packed_command(last_select_full_pack.as_ref()) {
+                                Ok(_d1) => {
                                     print!("重新目的端redis");
-                                },
-                                Err(_e)=>{
-                                    continue
                                 }
+                                Err(_e) => continue,
                             }
                         }
                         d
-                    },
-                    Err(_e)=>{
+                    }
+                    Err(_e) => {
                         sleep(Duration::from_secs(1));
-                        continue
+                        continue;
                     }
                 };
                 println!("连接成功!");
                 break;
             }
-            loop{
+            loop {
                 match receiver.recv_timeout(time_out) {
                     Ok(mut cmd) => {
                         // 先查看是不是select
-                        if String::from_utf8_lossy(cmd.cmd.as_ref()).to_lowercase().eq("select"){
-                            match String::from_utf8(cmd.full_pack.clone()){
-                                Ok(_d)=>{
-                                    last_select_full_pack = cmd.full_pack.clone()
-                                },
-                                Err(_e)=>{
-                                    println!("select error?")
-                                }
+                        if String::from_utf8_lossy(cmd.cmd.as_ref())
+                            .to_lowercase()
+                            .eq("select")
+                        {
+                            match String::from_utf8(cmd.full_pack.clone()) {
+                                Ok(_d) => last_select_full_pack = cmd.full_pack.clone(),
+                                Err(_e) => println!("select error?"),
                             }
                         };
                         req_packed.append(&mut cmd.full_pack);
                         batch_count = batch_count + 1;
-                        if batch_count >= 300 {
-                            match conn.req_packed_commands(req_packed.as_slice(), 0, batch_count) {
-                                Ok(_d) => {}
-                                Err(e) => {
-                                    match e.kind() {
-                                        ErrorKind::IoError=>{
-                                            break;
-                                        },
-                                        _ =>{
-                                          println!("增量阶段读取响应错误:{}",e.to_string());
-                                        }
-                                    }
-                                },
-                            };
-                            batch_count = 0;
-                            req_packed.clear();
-                        }
-                        send_count.fetch_add(1,Ordering::SeqCst);
+                        send_cmd!(conn, req_packed, send_count, batch_count, 300);
                     }
                     Err(_e) => {
-                        if batch_count > 0 {
-                            match conn.req_packed_commands(req_packed.as_slice(), 0, batch_count) {
-                                Ok(_d) => {}
-                                Err(e) => {
-                                    match e.kind() {
-                                        ErrorKind::IoError=>{
-                                            break;
-                                        },
-                                        _ =>{
-                                            println!("增量阶段读取响应错误:{}",e.to_string());
-                                        }
-                                    }
-                                },
-                            };
-                            batch_count = 0;
-                            req_packed.clear();
-                        }
+                        send_cmd!(conn, req_packed, send_count, batch_count, 0);
                     }
                 }
             }
@@ -202,18 +191,16 @@ pub fn incr(
                 }
 
                 // 解析加1
-                parse_count.fetch_add(1,Ordering::SeqCst);
+                atomic_u64_fetch_add!(parse_count, 1);
                 // 统计全部
-                count_all_bytes_c.fetch_add(pack.full_pack.len() as u64,Ordering::SeqCst);
-                // 统计10s
-                count_ten_bytes_c.fetch_add(pack.full_pack.len() as u64,Ordering::SeqCst);
+                atomic_u64_fetch_add!(count_all_bytes_c, pack.full_pack.len() as u64);
                 // 发送
                 sender.send(pack);
             } else {
                 print!("{}", p[0] as char);
             }
         }
-    };
+    }
     Ok(())
 }
 /*

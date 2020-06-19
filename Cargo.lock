@@ -410,9 +410,9 @@ checksum = "0b631f7e854af39a1739f401cf34a8a013dfe09eac4fa4dba91e9768bd28168d"
 
 [[package]]
 name = "os_pipe"
-version = "0.9.1"
+version = "0.9.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "db4d06355a7090ce852965b2d08e11426c315438462638c6d721448d0b47aa22"
+checksum = "fb233f06c2307e1f5ce2ecad9f8121cffbbee2c95428f44ea85222e460d0d213"
 dependencies = [
  "libc",
  "winapi 0.3.8",

@@ -6,3 +6,11 @@
 ## 欢迎issues
 ## 鸣谢
     https://github.com/alibaba/RedisShake
+## tips:
+    当发现tcp流量偏低 (0.x MB)
+    echo 'net.ipv4.tcp_rmem=12375648 16500864 24751296'>> /etc/sysctl.conf
+    echo 'net.ipv4.tcp_wmem=12375648 16500864 24751296'>> /etc/sysctl.conf
+    echo 'net.core.rmem_max=24751296' >> /etc/sysctl.conf
+    echo 'net.core.wmem_max=24751296' >> /etc/sysctl.conf
+    sysctl -p
+    即可调高tcp流量

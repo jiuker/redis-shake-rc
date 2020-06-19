@@ -34,8 +34,6 @@ pub mod Runner {
 
         let mut pipe_reader_buf = BufReader::with_capacity(10 * 1024 * 1024, pipe_reader);
 
-        let mut pipe_writer_buf = BufWriter::with_capacity(10 * 1024 * 1024, pipe_writer);
-
         let rdb_read_count = Arc::new(AtomicU64::new(0));
         let rdb_read_count_c = rdb_read_count.clone();
 
@@ -62,7 +60,7 @@ pub mod Runner {
                 if r_len != 0 {
                     atomic_u64_fetch_add!(rdb_read_count, r_len as u64);
                     let rrc = atomic_u64_load!(rdb_read_count);
-                    pipe_writer_buf.write_all(&p[0..r_len]).unwrap();
+                    pipe_writer.write_all(&p[0..r_len]).unwrap();
                     if rrc >= rdb_size as u64 {
                         // 现在是增量阶段，不需要写入了
                         break;
@@ -92,7 +90,7 @@ pub mod Runner {
                 };
                 if r_len != 0 {
                     atomic_u64_fetch_add!(offset_count_c, r_len as u64);
-                    pipe_writer_buf.write_all(&p[0..r_len]).unwrap();
+                    pipe_writer.write_all(&p[0..r_len]).unwrap();
                 } else {
                     // todo
                     // 没有读取到,只有错误的时候没有读取到?

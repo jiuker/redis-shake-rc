@@ -79,7 +79,8 @@ pub fn full(
                     loader.Footer().unwrap();
                     break;
                 } else {
-                    println!("err is {}", e);
+                    // todo 取消
+                    // panic!("RDB parse err is {}", e);
                 }
             }
         }

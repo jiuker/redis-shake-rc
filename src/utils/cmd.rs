@@ -1,9 +1,9 @@
-use byteorder::ReadBytesExt;
 use std::convert::AsRef;
 use std::error::Error;
-use std::io::Write;
-use std::net::TcpStream;
+use async_std::net::TcpStream;
 use std::ops::Add;
+use async_std::future::Future;
+use futures_util::{AsyncWriteExt,AsyncReadExt};
 
 pub fn cmd_to_string(cmd: Vec<&str>) -> String {
     let mut rsl = String::new();
@@ -18,36 +18,50 @@ pub fn cmd_to_string(cmd: Vec<&str>) -> String {
     return rsl;
 }
 
-pub fn cmd_to_resp_first_line(
+pub async fn cmd_to_resp_first_line(
     conn: &mut TcpStream,
     cmd: Vec<&str>,
-) -> Result<String, Box<dyn Error>> {
-    conn.write(cmd_to_string(cmd).as_bytes())?;
+) ->  Result<String, Box<dyn Error>> {
+    conn.write(cmd_to_string(cmd).as_bytes()).await?;
     let mut resp = String::new();
+    let mut resp_char = [0;1];
     loop {
-        let ch = conn.read_u8().unwrap() as char;
-        if ch == '\r' {
-            break;
-        }
-        if ch == '\n' {
-            continue;
-        }
-        resp.push(ch);
+        match conn.read_exact(&mut resp_char).await{
+            Ok(())=>{
+                if resp_char[0] == '\r' as u8 {
+                    break;
+                }
+                if resp_char[0] == '\n' as u8{
+                    continue;
+                }
+                resp.push(char::from(resp_char[0]));
+            },
+            Err(e)=>{
+                break;
+            }
+        };
     }
     Ok(resp)
 }
 
-pub fn read_line(conn: &mut TcpStream) -> Result<String, Box<dyn Error>> {
+pub async fn read_line(conn: &mut TcpStream) -> Result<String, Box<dyn Error>> {
     let mut resp = String::new();
+    let mut resp_char = [0;1];
     loop {
-        let ch = conn.read_u8().unwrap() as char;
-        if ch == '\r' {
-            break;
-        }
-        if ch == '\n' {
-            continue;
-        }
-        resp.push(ch);
+        match conn.read_exact(&mut resp_char).await{
+            Ok(())=>{
+                if resp_char[0] == '\r' as u8 {
+                    break;
+                }
+                if resp_char[0] == '\n' as u8{
+                    continue;
+                }
+                resp.push(char::from(resp_char[0]));
+            },
+            Err(e)=>{
+                break;
+            }
+        };
     }
     Ok(resp)
 }

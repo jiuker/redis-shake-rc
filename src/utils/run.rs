@@ -7,7 +7,8 @@ pub mod Runner {
     use crate::{atomic_u64_fetch_add, atomic_u64_load, source_report_offset};
     use redis::{Cmd, Value};
     use std::cell::RefCell;
-    use std::io::{BufReader, BufWriter, Read, Write};
+    use std::io::{BufReader, BufWriter, Write};
+    use async_std::io::{Read as AsyncRead,Write as AsyncWrite};
     use std::ops::Sub;
     use std::process::exit;
     use std::rc::Rc;
@@ -17,8 +18,12 @@ pub mod Runner {
     use std::thread::{sleep, spawn};
     use std::time::Duration;
     use time::Time;
+    use async_std::future::Future;
+    use std::error::Error;
+    use futures_util::AsyncReadExt;
+    use std::ptr::null;
 
-    pub fn mod_full(
+    pub async fn mod_full(
         source_url: &'static str,
         source_pass: &'static str,
         target_url: &'static str,
@@ -26,8 +31,8 @@ pub mod Runner {
     ) {
         let mut loader = Loader::new(Rc::new(RefCell::new("".as_bytes())));
 
-        let mut source = open_tcp_conn(source_url, source_pass).unwrap();
-        let (offset, rdb_size, uuid) = pre_to_rdb(&mut source).unwrap();
+        let mut source = open_tcp_conn(source_url, source_pass).await.unwrap();
+        let (offset, rdb_size, uuid) = pre_to_rdb(&mut source).await.unwrap();
 
         // 带缓存的管道
         let (pipe_reader, mut pipe_writer) = os_pipe::pipe().unwrap();
@@ -44,13 +49,13 @@ pub mod Runner {
         let offset_count = Arc::new(AtomicU64::new(offset as u64));
         let offset_count_c = offset_count.clone();
         // 读取源端数据
-        spawn(move || {
-            let mut source_c = source.try_clone().unwrap();
+        spawn(move || async move {
+            let mut source_c = source.clone();
             source_report_offset!(source_c, offset_count);
-            let mut p = [0; 512 * 1024];
+            let mut p = [0; 1024];
             // 全量的数据
             loop {
-                let r_len = match source.read(&mut p) {
+                let r_len = match source.read(&mut p).await {
                     Ok(d) => d,
                     Err(e) => {
                         println!("source tcp error {}", e);
@@ -60,6 +65,7 @@ pub mod Runner {
                 if r_len != 0 {
                     atomic_u64_fetch_add!(rdb_read_count, r_len as u64);
                     let rrc = atomic_u64_load!(rdb_read_count);
+                    dbg!(&p[0..r_len]);
                     pipe_writer.write_all(&p[0..r_len]).unwrap();
                     if rrc >= rdb_size as u64 {
                         // 现在是增量阶段，不需要写入了
@@ -81,7 +87,7 @@ pub mod Runner {
             }
             println!("开始读取增量!");
             loop {
-                let r_len = match source.read(&mut p) {
+                let r_len = match source.read(&mut p).await {
                     Ok(d) => d,
                     Err(e) => {
                         println!("source tcp error {}", e);
@@ -94,27 +100,28 @@ pub mod Runner {
                 } else {
                     // todo
                     // 没有读取到,只有错误的时候没有读取到?
-                    match open_tcp_conn(source_url, source_pass) {
-                        Ok(d) => {
-                            source = d;
-                            match pre_to_inc(
-                                &mut source,
-                                uuid.as_ref(),
-                                format!("{}", offset_count_c.load(Ordering::SeqCst) + 1).as_ref(),
-                            ) {
-                                Ok(()) => {
-                                    let offset_count_c_1 = offset_count_c.clone();
-                                    let mut source_c = source.try_clone().unwrap();
-                                    source_report_offset!(source_c, offset_count_c_1);
-                                }
-                                Err(_e) => {
-                                    // 增量已经无法满足了
-                                    exit(1);
-                                }
-                            };
+                    let re_connect_conn = match open_tcp_conn(source_url, source_pass).await {
+                        Ok(d) => d,
+                        Err(_e) => {
+                            continue
+                        },
+                    };
+                    source = re_connect_conn;
+                    match pre_to_inc(
+                        &mut source,
+                        uuid.as_ref(),
+                        format!("{}", offset_count_c.load(Ordering::SeqCst) + 1).as_ref(),
+                    ).await {
+                        Ok(()) => {
+                            let offset_count_c_1 = offset_count_c.clone();
+                            let mut source_c = source.clone();
+                            source_report_offset!(source_c, offset_count_c_1);
                         }
-                        Err(_e) => println!("源端redis重连失败!"),
-                    }
+                        Err(_e) => {
+                            // 增量已经无法满足了
+                            exit(1);
+                        }
+                    };
                 }
                 // 防止空转
                 sleep(Duration::from_millis(5));
@@ -132,6 +139,7 @@ pub mod Runner {
         });
         loader.rdbReader.raw =
             Rc::new(RefCell::new(pipe_reader_buf.get_mut().try_clone().unwrap()));
+        //读取rdb文件的header
         println!("rdb头部为 {:?}", loader.Header());
         // 全量rdb的命令
         let (full_cmd_sender, full_cmd_receiver) = sync_channel::<Cmd>(20000);

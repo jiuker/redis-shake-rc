@@ -3,26 +3,21 @@ use net2::TcpStreamExt;
 use redis::{Client, Connection};
 use std::convert::TryFrom;
 use std::error::Error;
-use std::net::TcpStream;
 use std::ops::Add;
 use std::time::Duration;
+use async_std::net::TcpStream;
+use async_std::future::Future;
 
-pub fn open_tcp_conn(url: &str, pass: &str) -> Result<TcpStream, Box<dyn Error>> {
-    let mut source = std::net::TcpStream::connect(url)?;
+pub async fn open_tcp_conn(url: &str, pass: &str) ->  Result<TcpStream, Box<dyn Error>>{
+    let mut source = TcpStream::connect(url).await?;
     if !pass.is_empty() {
-        let auth_resp = cmd_to_resp_first_line(&mut source, vec!["auth", pass])?;
+        let auth_resp = cmd_to_resp_first_line(&mut source, vec!["auth", pass]).await?;
         if auth_resp.contains("ERR") {
             return Err(Box::from(auth_resp));
         } else {
             println!("auth success")
         }
     };
-    source.set_write_timeout(Some(Duration::from_secs(30)))?;
-    source.set_read_timeout(Some(Duration::from_secs(30)))?;
-    source.set_recv_buffer_size(10 * 1024 * 1024)?;
-    source.set_send_buffer_size(10 * 1024 * 1024)?;
-    source.set_keepalive(Some(Duration::from_secs(10)))?;
-    source.set_nonblocking(false)?;
     Ok(source)
 }
 pub fn open_redis_conn(

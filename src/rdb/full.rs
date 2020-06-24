@@ -15,7 +15,7 @@ use std::rc::Rc;
 
 use std::sync::mpsc::{SyncSender};
 
-use std::thread::{spawn};
+use async_std::task::spawn;
 
 use crc64::Crc64;
 use time::{Time};
@@ -94,8 +94,8 @@ pub async fn OverRestoreQuicklistEntry(
 ) -> Result<(), Box<dyn error::Error>> {
     let ( mut write,read) = async_pipe::pipe();
     let value = e.Value.clone();
-    spawn(move||{
-        write.write_all(value.as_slice());
+    spawn(async move{
+        write.write_all(value.as_slice()).await.unwrap();
     });
     let mut r = rdbReader {
         raw: Rc::new(RefCell::new(read)),
@@ -126,8 +126,8 @@ pub async fn OverRestoreBigRdbEntry(
 ) -> Result<(), Box<dyn error::Error>> {
     let ( mut write,read) = async_pipe::pipe();
     let value = e.Value.clone();
-    spawn(move||{
-        write.write_all(value.as_slice());
+    spawn(async move{
+        write.write_all(value.as_slice()).await.unwrap();
     });
     let mut r = rdbReader {
         raw: Rc::new(RefCell::new(read)),

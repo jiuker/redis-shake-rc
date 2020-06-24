@@ -15,8 +15,8 @@ pub mod Runner {
     use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
     use std::sync::mpsc::{sync_channel, RecvTimeoutError};
     use std::sync::Arc;
-    use std::thread::{sleep, spawn};
-    use async_std::task::spawn as asyncSpawn;
+    use std::thread::{sleep};
+    use async_std::task::spawn;
     use std::time::Duration;
     use time::Time;
     use async_std::future::Future;
@@ -50,11 +50,10 @@ pub mod Runner {
         let offset_count = Arc::new(AtomicU64::new(offset as u64));
         let offset_count_c = offset_count.clone();
         // 读取源端数据
-        asyncSpawn(async move {
-            sleep(Duration::from_secs(1));
+        spawn(async move {
             let mut source_c = source.clone();
             source_report_offset!(source_c, offset_count);
-            let mut p = [0; 64*1024];
+            let mut p = [0; 1024];
             // 全量的数据
             loop {
                 let r_len = match source.read(&mut p).await {
@@ -127,7 +126,7 @@ pub mod Runner {
             }
         });
         // 全量阶段输出读取进度
-        spawn(move || {
+        spawn(async move {
             loop{
                 let rrcc = atomic_u64_load!(rdb_read_count_c);
                 println!("[RDB] total bytes:{} byte, read: {} ", rdb_size, rrcc);
@@ -142,7 +141,7 @@ pub mod Runner {
         println!("rdb头部为 {:?}", loader.Header().await);
         // 全量rdb的命令
         let (full_cmd_sender, full_cmd_receiver) = sync_channel::<Cmd>(20000);
-        spawn(move || {
+        spawn(async move {
             let mut pipe = redis::pipe();
             let mut full_cmd_count = 0;
             let mut target_conn = open_redis_conn(target_url, target_pass, "").unwrap();

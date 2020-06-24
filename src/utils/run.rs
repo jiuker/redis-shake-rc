@@ -51,6 +51,7 @@ pub mod Runner {
         let offset_count_c = offset_count.clone();
         // 读取源端数据
         spawn(async move {
+            sleep(Duration::from_secs(1));
             let mut source_c = source.clone();
             source_report_offset!(source_c, offset_count);
             let mut p = [0; 1024];

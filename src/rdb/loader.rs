@@ -10,6 +10,8 @@ use std::f64::{NAN, NEG_INFINITY};
 use std::io::{Read, Write};
 
 use std::rc::Rc;
+use tokio::io::AsyncReadExt;
+use futures_util::TryFutureExt;
 
 pub struct Loader {
     pub rdbReader: rdbReader,
@@ -71,7 +73,7 @@ pub const rdbZiplistInt24: u8 = 0xf0;
 pub const rdbZiplistInt8: u8 = 0xfe;
 pub const rdbZiplistInt4: u8 = 15;
 impl Loader {
-    pub fn new(r: Rc<RefCell<dyn Read>>) -> Loader {
+    pub fn new(r: Rc<RefCell<async_pipe::PipeReader>>) -> Loader {
         Loader {
             rdbReader: rdbReader {
                 raw: r,
@@ -97,9 +99,9 @@ impl Loader {
             }),
         }
     }
-    pub fn Header(&mut self) -> Result<(), Box<dyn Error>> {
+    pub async fn Header(&mut self) -> Result<(), Box<dyn Error>> {
         let mut head_byt = [0 as u8; 9];
-        self.readFull(&mut head_byt)?;
+        self.readFull(&mut head_byt).await?;
         if head_byt[0..5].ne("REDIS".as_bytes()) {
             return Err(Box::from("不是rdb文件的header"));
         }
@@ -107,35 +109,35 @@ impl Loader {
         println!("rdb version is {}", version);
         Ok(())
     }
-    fn readFull(&mut self, p: &mut [u8]) -> Result<(), Box<dyn Error>> {
-        self.rdbReader.raw.borrow_mut().read_exact(p);
+    async fn readFull(&mut self, p: &mut [u8]) -> Result<(), Box<dyn Error>> {
+        self.rdbReader.raw.borrow_mut().read_exact(p).await;
         self.rdbReader.crc64.write_all(p);
         if self.rdbReader.is_cache_buf{
             self.rdbReader.buf.append(&mut p.to_vec());
         }
         Ok(())
     }
-    pub fn Footer(&mut self) -> Result<(), Box<dyn Error>> {
+    pub async fn Footer(&mut self) -> Result<(), Box<dyn Error>> {
         let crc = self.rdbReader.crc64.get();
-        let rdb_file_u64 = self.rdbReader.readUint64()?;
+        let rdb_file_u64 = self.rdbReader.readUint64().await?;
         if rdb_file_u64 != crc {
             println!("{},{}", rdb_file_u64, crc);
             return Err(Box::from("sum校验 不一致!{}{}"));
         };
         Ok(())
     }
-    pub fn NextBinEntry(&mut self, entry: &mut BinEntry) -> Result<(), Box<dyn Error>> {
+    pub async fn NextBinEntry(&mut self, entry: &mut BinEntry) -> Result<(), Box<dyn Error>> {
         loop {
             let mut t = 0;
             if self.rdbReader.remainMember != 0 {
                 t = self.lastEntry.Type
             } else {
-                t = self.rdbReader.ReadByte()?;
+                t = self.rdbReader.ReadByte().await?;
             }
             match t {
                 RdbFlagAUX => {
-                    let aux_key = self.rdbReader.ReadString()?;
-                    let aux_value = self.rdbReader.ReadString()?;
+                    let aux_key = self.rdbReader.ReadString().await?;
+                    let aux_value = self.rdbReader.ReadString().await?;
                     println!(
                         "Aux information key:{:?} {:?}",
                         String::from_utf8(aux_key.clone()),
@@ -150,42 +152,42 @@ impl Loader {
                     }
                 }
                 rdbFlagResizeDB => {
-                    let db_size = self.rdbReader.ReadLength()?;
-                    let expire_size = self.rdbReader.ReadLength()?;
+                    let db_size = self.rdbReader.ReadLength().await?;
+                    let expire_size = self.rdbReader.ReadLength().await?;
                     println!("db_size:{} expire_size: {}", db_size, expire_size);
                 }
                 rdbFlagExpiryMS => {
-                    let ttlms = self.rdbReader.readUint64()?;
+                    let ttlms = self.rdbReader.readUint64().await?;
                     entry.ExpireAt = ttlms;
                 }
                 rdbFlagExpiry => {
-                    let ttls = self.rdbReader.readUint32()?;
+                    let ttls = self.rdbReader.readUint32().await?;
                     entry.ExpireAt = (ttls as u64) * 1000
                 }
                 rdbFlagSelectDB => {
-                    let dbnum = self.rdbReader.ReadLength()?;
+                    let dbnum = self.rdbReader.ReadLength().await?;
                     self.db = dbnum
                 }
                 rdbFlagEOF => {
                     return Err(Box::from("RDB END"));
                 }
                 rdbFlagModuleAux => {
-                    let _ = self.rdbReader.ReadLength()?;
-                    rdbLoadCheckModuleValue(self)?;
+                    let _ = self.rdbReader.ReadLength().await?;
+                    rdbLoadCheckModuleValue(self).await?;
                 }
                 rdbFlagIdle => {
-                    let idle = self.rdbReader.ReadLength()?;
+                    let idle = self.rdbReader.ReadLength().await?;
                     entry.IdleTime = idle;
                 }
                 rdbFlagFreq => {
-                    let freq = self.rdbReader.readUint8()?;
+                    let freq = self.rdbReader.readUint8().await?;
                     entry.Freq = freq
                 }
                 _ => {
                     let mut key = vec![];
                     if self.rdbReader.remainMember == 0 {
                         // first time visit this key.
-                        key = self.rdbReader.ReadString()?;
+                        key = self.rdbReader.ReadString().await?;
                         entry.NeedReadLen = 1; // read value length when it's the first time.
                     } else {
                         key = self.lastEntry.Key.clone()
@@ -193,7 +195,7 @@ impl Loader {
                     //log.Debugf("l %p r %p", l, l.rdbReader)
                     //log.Debug("remainMember:", l.remainMember, " key:", string(key[:]), " type:", t)
                     //log.Debug("r.remainMember:", l.rdbReader.remainMember)
-                    let val = self.rdbReader.readObjectValue(t)?;
+                    let val = self.rdbReader.readObjectValue(t).await?;
                     entry.DB = self.db;
                     entry.Key = key;
                     entry.Type = t;
@@ -233,7 +235,7 @@ pub struct BinEntry {
     pub Freq: u8,
 }
 pub struct rdbReader {
-    pub raw: Rc<RefCell<dyn Read>>,
+    pub raw: Rc<RefCell<async_pipe::PipeReader>>,
     pub crc64:Crc64,
     pub is_cache_buf:bool,
     pub buf: Vec<u8>,
@@ -244,25 +246,25 @@ pub struct rdbReader {
 }
 macro_rules! read_uint {
     ($fun_name_uint:ident,$fun_name_int:ident,$n:expr,$reslut_fun:ident,$result_type:ty,$result_type_int:ty) => (
-        pub fn $fun_name_uint(&mut self) -> Result<$result_type, Box<dyn Error>> {
+        pub async fn $fun_name_uint(&mut self) -> Result<$result_type, Box<dyn Error>> {
             let mut p: Vec<u8> = vec![0; $n];
-            self.raw.borrow_mut().read_exact(p.as_mut())?;
+            self.raw.borrow_mut().read_exact(p.as_mut()).await?;
             self.crc64.write_all(p.to_vec().as_slice());
             if self.is_cache_buf {
                 self.buf.append(p.to_vec().as_mut());
             }
             Ok(self.$reslut_fun(&p))
         }
-        pub fn $fun_name_int(&mut self)->Result<$result_type_int, Box<dyn Error>> {
-            Ok(self.$fun_name_uint()? as $result_type_int)
+        pub async fn $fun_name_int(&mut self)->Result<$result_type_int, Box<dyn Error>> {
+            Ok(self.$fun_name_uint().await? as $result_type_int)
         }
     );
 }
 macro_rules! read_uint_big {
     ($fun_name:ident,$n:expr,$reslut_fun:ident) => (
-         pub fn $fun_name(&mut self) -> Result<u32, Box<dyn Error>> {
+         pub async fn $fun_name(&mut self) -> Result<u32, Box<dyn Error>> {
             let mut p = [0 as u8; $n];
-            self.raw.borrow_mut().read_exact(p.as_mut())?;
+            self.raw.borrow_mut().read_exact(p.as_mut()).await?;
             self.crc64.write_all(p.to_vec().as_slice());
             if self.is_cache_buf {
                 self.buf.append(p.to_vec().as_mut());
@@ -294,12 +296,12 @@ macro_rules! base_u {
     );
 }
 impl rdbReader {
-    pub fn ReadZipmapItem(
+    pub async fn ReadZipmapItem(
         &mut self,
         buf: &mut sliceBuffer,
         readFree: bool,
     ) -> Result<Vec<u8>, Box<dyn Error>> {
-        let (length, free) = self.readZipmapItemLength(buf, readFree)?;
+        let (length, free) = self.readZipmapItemLength(buf, readFree).await?;
         if length == -1 {
             return Ok(vec![]);
         };
@@ -307,7 +309,7 @@ impl rdbReader {
         buf.Seek(free as i64, 1);
         Ok(value)
     }
-    pub fn readZipmapItemLength(
+    pub async fn readZipmapItemLength(
         &mut self,
         buf: &mut sliceBuffer,
         readFree: bool,
@@ -335,10 +337,10 @@ impl rdbReader {
         };
         Ok((b as i32, free as i32))
     }
-    pub fn CountZipmapItems(&mut self, buf: &mut sliceBuffer) -> Result<i32, Box<dyn Error>> {
+    pub async fn CountZipmapItems(&mut self, buf: &mut sliceBuffer) -> Result<i32, Box<dyn Error>> {
         let mut n = 0;
         loop {
-            let (strLen, free) = self.readZipmapItemLength(buf, n % 2 != 0)?;
+            let (strLen, free) = self.readZipmapItemLength(buf, n % 2 != 0).await?;
             if strLen == -1 {
                 break;
             };
@@ -348,7 +350,7 @@ impl rdbReader {
         buf.Seek(0, 0)?;
         Ok(n)
     }
-    pub fn ReadZiplistEntry(&mut self, buf: &mut sliceBuffer) -> Result<Vec<u8>, Box<dyn Error>> {
+    pub async fn ReadZiplistEntry(&mut self, buf: &mut sliceBuffer) -> Result<Vec<u8>, Box<dyn Error>> {
         let prevLen = buf.ReadByte()?;
         if prevLen == 254 {
             buf.Seek(4, 1); // skip the 4-byte prevlen
@@ -397,42 +399,42 @@ impl rdbReader {
         }
         Err(Box::from("rdb: unknown ziplist header byte"))
     }
-    pub fn ReadZiplistLength(&mut self, buf: &mut sliceBuffer) -> Result<i64, Box<dyn Error>> {
+    pub async fn ReadZiplistLength(&mut self, buf: &mut sliceBuffer) -> Result<i64, Box<dyn Error>> {
         buf.Seek(8, 0); // skip the zlbytes and zltail
         let lenBytes = buf.Slice(2)?;
         Ok(self.u16(lenBytes.as_slice()) as i64)
     }
-    pub fn ReadByte(&mut self) -> Result<u8, Box<dyn Error>> {
+    pub async fn ReadByte(&mut self) -> Result<u8, Box<dyn Error>> {
         let mut p = [0 as u8; 1];
-        self.raw.borrow_mut().read_exact(p.as_mut())?;
+        self.raw.borrow_mut().read_exact(p.as_mut()).await?;
         self.crc64.write_all(p.to_vec().as_slice());
         if self.is_cache_buf{
             self.buf.append(p.to_vec().as_mut());
         }
         Ok(p[0])
     }
-    pub fn ReadString(&mut self) -> Result<Vec<u8>, Box<dyn Error>> {
-        let (length, encoded) = self.readEncodedLength()?;
+    pub async fn ReadString(&mut self) -> Result<Vec<u8>, Box<dyn Error>> {
+        let (length, encoded) = self.readEncodedLength().await?;
         if !encoded {
-            return self.ReadBytes(length as usize);
+            return self.ReadBytes(length as usize).await;
         }
         match length as u8 {
             rdbEncInt8 => {
-                let i = self.readInt8()?;
+                let i = self.readInt8().await?;
                 return Ok(Vec::from(format!("{}", i)));
             }
             rdbEncInt16 => {
-                let i = self.readInt16()?;
+                let i = self.readInt16().await?;
                 return Ok(Vec::from(format!("{}", i)));
             }
             rdbEncInt32 => {
-                let i = self.readInt32()?;
+                let i = self.readInt32().await?;
                 return Ok(Vec::from(format!("{}", i)));
             }
             rdbEncLZF => {
-                let inlen = self.ReadLength()?;
-                let outlen = self.ReadLength()?;
-                let in_data = self.ReadBytes(inlen as usize)?;
+                let inlen = self.ReadLength().await?;
+                let outlen = self.ReadLength().await?;
+                let in_data = self.ReadBytes(inlen as usize).await?;
                 return lzfDecompress(&in_data, outlen as usize);
             }
             _ => {
@@ -441,8 +443,8 @@ impl rdbReader {
         }
         Ok(Vec::from("".as_bytes()))
     }
-    pub fn readEncodedLength(&mut self) -> Result<(u32, bool), Box<dyn Error>> {
-        let u = self.readUint8()?;
+    pub async fn readEncodedLength(&mut self) -> Result<(u32, bool), Box<dyn Error>> {
+        let u = self.readUint8().await?;
         let mut length = 0;
         let mut encoded = false;
         match u >> 6 {
@@ -450,7 +452,7 @@ impl rdbReader {
                 length = (u & 0x3f) as u32;
             }
             rdb14bitLen => {
-                let u2 = self.readUint8()?;
+                let u2 = self.readUint8().await?;
                 length = (((u & 0x3f) as u32) << 8) + u2 as u32;
             }
             rdbEncVal => {
@@ -459,10 +461,10 @@ impl rdbReader {
             }
             _ => match u {
                 rdb32bitLen => {
-                    length = self.readUint32BigEndian()?;
+                    length = self.readUint32BigEndian().await?;
                 }
                 rdb64bitLen => {
-                    length = self.readUint64BigEndian()?;
+                    length = self.readUint64BigEndian().await?;
                 }
                 _ => {
                     return Err(Box::from(format!("unknown encoding length {}",u)));
@@ -481,24 +483,24 @@ impl rdbReader {
     base_u!(u16,u16big,u16,1);
     base_u!(u32,u32big,u32,3);
     base_u!(u64,u64big,u64,7);
-    pub fn ReadBytes(&mut self, n: usize) -> Result<Vec<u8>, Box<dyn Error>> {
+    pub async fn ReadBytes(&mut self, n: usize) -> Result<Vec<u8>, Box<dyn Error>> {
         let mut p: Vec<u8> = vec![0; n];
-        self.raw.borrow_mut().read_exact(&mut p)?;
+        self.raw.borrow_mut().read_exact(&mut p).await?;
         self.crc64.write_all(p.to_vec().as_slice());
         if self.is_cache_buf{
             self.buf.append(p.clone().as_mut());
         }
         Ok(p)
     }
-    pub fn ReadLength(&mut self) -> Result<u32, Box<dyn Error>> {
-        let (length, encoded) = self.readEncodedLength()?;
+    pub async fn ReadLength(&mut self) -> Result<u32, Box<dyn Error>> {
+        let (length, encoded) = self.readEncodedLength().await?;
         if encoded {
             return Err(Box::from("encoded-length"));
         };
         Ok(length)
     }
-    pub fn ReadFloat(&mut self) -> Result<f64, Box<dyn Error>> {
-        let u = self.readUint8()?;
+    pub async fn ReadFloat(&mut self) -> Result<f64, Box<dyn Error>> {
+        let u = self.readUint8().await?;
         match u {
             253 => {
                 return Ok(NAN);
@@ -506,14 +508,14 @@ impl rdbReader {
             254 => return Ok(INFINITY as f64),
             255 => return Ok(NEG_INFINITY),
             _ => {
-                let b = self.ReadBytes(u as usize)?;
+                let b = self.ReadBytes(u as usize).await?;
                 return Ok(String::from_utf8(b)?.parse::<f64>()?);
             }
         }
     }
-    pub fn ReadDouble(&mut self) -> Result<f64, Box<dyn Error>> {
+    pub async fn ReadDouble(&mut self) -> Result<f64, Box<dyn Error>> {
         let mut p = [0 as u8; 8];
-        self.raw.borrow_mut().read_exact(p.as_mut())?;
+        self.raw.borrow_mut().read_exact(p.as_mut()).await?;
         self.crc64.write_all(p.to_vec().as_slice());
         if self.is_cache_buf {
             self.buf.append(p.to_vec().as_mut());
@@ -521,7 +523,7 @@ impl rdbReader {
         Ok(self.u64(&p) as f64)
     }
 
-    pub fn readObjectValue(&mut self, t: u8) -> Result<Vec<u8>, Box<dyn Error>> {
+    pub async fn readObjectValue(&mut self, t: u8) -> Result<Vec<u8>, Box<dyn Error>> {
         let mut lr = self;
         lr.is_cache_buf = true;
         match t {
@@ -530,28 +532,28 @@ impl rdbReader {
                 lr.lastReadCount = 0;
                 lr.remainMember = 0;
                 lr.totMemberCount = 0;
-                lr.ReadString()?;
+                lr.ReadString().await?;
             }
             RdbTypeList | RdbTypeSet | RdbTypeQuicklist => {
                 lr.lastReadCount = 0;
                 lr.remainMember = 0;
                 lr.totMemberCount = 0;
-                let n = lr.ReadLength()?;
+                let n = lr.ReadLength().await?;
                 for _i in 0..n {
-                    lr.ReadString()?;
+                    lr.ReadString().await?;
                 }
             }
             RdbTypeZSet | RdbTypeZSet2 => {
                 lr.lastReadCount = 0;
                 lr.remainMember = 0;
                 lr.totMemberCount = 0;
-                let n = lr.ReadLength()?;
+                let n = lr.ReadLength().await?;
                 for _i in 0..n {
-                    lr.ReadString()?;
+                    lr.ReadString().await?;
                     if t == RdbTypeZSet2 {
-                        lr.ReadDouble()?;
+                        lr.ReadDouble().await?;
                     } else {
-                        lr.ReadFloat()?;
+                        lr.ReadFloat().await?;
                     }
                 }
             }
@@ -560,14 +562,14 @@ impl rdbReader {
                 if lr.remainMember != 0 {
                     n = lr.remainMember
                 } else {
-                    let rlen = lr.ReadLength()?;
+                    let rlen = lr.ReadLength().await?;
                     n = rlen;
                     lr.totMemberCount = rlen;
                 }
                 lr.lastReadCount = 0;
                 for i in 0..n {
-                    lr.ReadString()?;
-                    lr.ReadString()?;
+                    lr.ReadString().await?;
+                    lr.ReadString().await?;
                     lr.lastReadCount = lr.lastReadCount + 1;
                     if lr.buf.len() > 16*1024*1024 && i != (n - 1) {
                         lr.remainMember = n - i - 1;
@@ -585,47 +587,47 @@ impl rdbReader {
                 lr.lastReadCount = 0;
                 lr.remainMember = 0;
                 lr.totMemberCount = 0;
-                let nListPacks = lr.ReadLength()?;
+                let nListPacks = lr.ReadLength().await?;
                 // list pack length
                 for _ in 0..nListPacks {
                     // read twice
-                    lr.ReadString()?;
-                    lr.ReadString()?;
+                    lr.ReadString().await?;
+                    lr.ReadString().await?;
                 }
                 // items
-                lr.ReadLength()?;
+                lr.ReadLength().await?;
                 // last_entry_id timestamp second
-                lr.ReadLength()?;
+                lr.ReadLength().await?;
                 // last_entry_id timestamp millisecond
-                lr.ReadLength()?;
+                lr.ReadLength().await?;
                 // cgroups length
-                let nCgroups = lr.ReadLength()?;
+                let nCgroups = lr.ReadLength().await?;
                 for _ in 0..nCgroups {
                     // cname
-                    lr.ReadString()?;
+                    lr.ReadString().await?;
                     // last_cg_entry_id timestamp second
-                    lr.ReadLength()?;
+                    lr.ReadLength().await?;
                     // last_cg_entry_id timestamp millisecond
-                    lr.ReadLength()?;
+                    lr.ReadLength().await?;
                     // pending number
-                    let nPending = lr.ReadLength()?;
+                    let nPending = lr.ReadLength().await?;
                     for _ in 0..nPending {
                         // eid, read 16 bytes
-                        lr.ReadBytes(16)?;
+                        lr.ReadBytes(16).await?;
                         // seen_time
-                        lr.ReadBytes(8)?;
+                        lr.ReadBytes(8).await?;
                         // delivery_count
-                        lr.ReadLength()?;
+                        lr.ReadLength().await?;
                     }
                     // consumers
-                    let nConsumers = lr.ReadLength()?;
+                    let nConsumers = lr.ReadLength().await?;
                     for _ in 0..nConsumers {
                         // cname
-                        lr.ReadString()?;
+                        lr.ReadString().await?;
                         // seen_time
-                        lr.ReadBytes(8)?;
+                        lr.ReadBytes(8).await?;
                         // pending
-                        let nPending2 = lr.ReadLength()?;
+                        let nPending2 = lr.ReadLength().await?;
                         for _ in 0..nPending2 {
                             lr.ReadBytes(16);
                         }
@@ -692,28 +694,28 @@ pub fn lzfDecompress(in_data: &Vec<u8>, outlen: usize) -> Result<Vec<u8>, Box<dy
     Ok(out)
 }
 
-fn rdbLoadCheckModuleValue(l: &mut Loader) -> Result<(), Box<dyn Error>> {
+async fn rdbLoadCheckModuleValue(l: &mut Loader) -> Result<(), Box<dyn Error>> {
     let _opcode: u32 = 0;
     loop {
-        let opcode = l.rdbReader.ReadLength()?;
+        let opcode = l.rdbReader.ReadLength().await?;
         if opcode == rdbModuleOpcodeEof {
             break;
         }
         match opcode {
             rdbModuleOpcodeSint => {
-                l.rdbReader.ReadLength()?;
+                l.rdbReader.ReadLength().await?;
             }
             rdbModuleOpcodeUint => {
-                l.rdbReader.ReadLength()?;
+                l.rdbReader.ReadLength().await?;
             }
             rdbModuleOpcodeString => {
-                l.rdbReader.ReadString()?;
+                l.rdbReader.ReadString().await?;
             }
             rdbModuleOpcodeFloat => {
-                l.rdbReader.ReadFloat()?;
+                l.rdbReader.ReadFloat().await?;
             }
             rdbModuleOpcodeDouble => {
-                l.rdbReader.ReadDouble()?;
+                l.rdbReader.ReadDouble().await?;
             }
             _ => {}
         }

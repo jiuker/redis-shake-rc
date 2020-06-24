@@ -10,6 +10,8 @@ use std::sync::mpsc::sync_channel;
 use std::sync::Arc;
 use std::thread::{sleep, spawn};
 use std::time::Duration;
+use crate::rdb::loader::Loader;
+use tokio::io::AsyncReadExt;
 #[macro_export(atomic_u64_fetch_add)]
 macro_rules! atomic_u64_fetch_add {
     ($data:ident,$inr:expr) => {
@@ -44,8 +46,8 @@ macro_rules! send_cmd {
     };
 }
 
-pub fn incr(
-    source_reader: &mut dyn Read,
+pub async fn incr(
+    loader: &mut Loader,
     target_url: &'static str,
     target_pass: &'static str,
 ) -> Result<(), Box<dyn Error>> {
@@ -130,7 +132,7 @@ pub fn incr(
     // 解包
     loop {
         let mut p = [0; 1];
-        let r_len = source_reader.read(&mut p).unwrap();
+        let r_len = loader.rdbReader.raw.borrow_mut().read(&mut p).await.unwrap();
         if r_len != 0 {
             // 这里就是一个完整的包体
             let mut pack = cmd_pack {
@@ -142,7 +144,7 @@ pub fn incr(
                 let mut args_num_vec = Vec::new();
                 loop {
                     let mut p_ = [0; 1];
-                    let r_len = source_reader.read(&mut p_).unwrap();
+                    let r_len = loader.rdbReader.raw.borrow_mut().read(&mut p_).await.unwrap();
                     if r_len != 0 {
                         pack.full_pack.push(p_[0]);
                         if p_[0] == '\r' as u8 {
@@ -162,7 +164,7 @@ pub fn incr(
                     let mut args_num_vec = Vec::new();
                     loop {
                         let mut p_ = [0; 1];
-                        let r_len = source_reader.read(&mut p_).unwrap();
+                        let r_len = loader.rdbReader.raw.borrow_mut().read(&mut p_).await.unwrap();
                         if r_len != 0 {
                             pack.full_pack.push(p_[0]);
                             if p_[0] == '\r' as u8 {
@@ -181,7 +183,7 @@ pub fn incr(
                         .parse::<i32>()
                         .unwrap();
                     let mut p_: Vec<u8> = vec![0; (args_num + 2) as usize];
-                    source_reader.read_exact(&mut p_).unwrap();
+                    loader.rdbReader.raw.borrow_mut().read_exact(&mut p_).await.unwrap();
                     pack.full_pack.append(p_.clone().as_mut());
                     if i == 0 {
                         p_.pop();

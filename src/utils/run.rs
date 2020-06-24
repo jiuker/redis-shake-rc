@@ -7,7 +7,7 @@ pub mod Runner {
     use crate::{atomic_u64_fetch_add, atomic_u64_load, source_report_offset};
     use redis::{Cmd, Value};
     use std::cell::RefCell;
-    use std::io::{BufReader, BufWriter, Write};
+    use std::io::{BufReader, Write};
     use async_std::io::{Read as AsyncRead,Write as AsyncWrite};
     use std::ops::Sub;
     use std::process::exit;
@@ -16,12 +16,14 @@ pub mod Runner {
     use std::sync::mpsc::{sync_channel, RecvTimeoutError};
     use std::sync::Arc;
     use std::thread::{sleep, spawn};
+    use async_std::task::spawn as asyncSpawn;
     use std::time::Duration;
     use time::Time;
     use async_std::future::Future;
     use std::error::Error;
     use futures_util::AsyncReadExt;
     use std::ptr::null;
+    use tokio::io::{BufWriter, AsyncWriteExt};
 
     pub async fn mod_full(
         source_url: &'static str,
@@ -29,15 +31,14 @@ pub mod Runner {
         target_url: &'static str,
         target_pass: &'static str,
     ) {
-        let mut loader = Loader::new(Rc::new(RefCell::new("".as_bytes())));
 
         let mut source = open_tcp_conn(source_url, source_pass).await.unwrap();
         let (offset, rdb_size, uuid) = pre_to_rdb(&mut source).await.unwrap();
 
         // 带缓存的管道
-        let (pipe_reader, mut pipe_writer) = os_pipe::pipe().unwrap();
+        let (mut pipe_writer, mut pipe_reader) = async_pipe::pipe();
 
-        let mut pipe_reader_buf = BufReader::with_capacity(10 * 1024 * 1024, pipe_reader);
+        let mut loader = Loader::new(Rc::new(RefCell::new(pipe_reader)));
 
         let rdb_read_count = Arc::new(AtomicU64::new(0));
         let rdb_read_count_c = rdb_read_count.clone();
@@ -49,10 +50,11 @@ pub mod Runner {
         let offset_count = Arc::new(AtomicU64::new(offset as u64));
         let offset_count_c = offset_count.clone();
         // 读取源端数据
-        spawn(move || async move {
+        asyncSpawn(async move {
+            sleep(Duration::from_secs(1));
             let mut source_c = source.clone();
             source_report_offset!(source_c, offset_count);
-            let mut p = [0; 1024];
+            let mut p = [0; 64*1024];
             // 全量的数据
             loop {
                 let r_len = match source.read(&mut p).await {
@@ -65,8 +67,7 @@ pub mod Runner {
                 if r_len != 0 {
                     atomic_u64_fetch_add!(rdb_read_count, r_len as u64);
                     let rrc = atomic_u64_load!(rdb_read_count);
-                    dbg!(&p[0..r_len]);
-                    pipe_writer.write_all(&p[0..r_len]).unwrap();
+                    pipe_writer.write_all(&p[0..r_len]).await.unwrap();
                     if rrc >= rdb_size as u64 {
                         // 现在是增量阶段，不需要写入了
                         break;
@@ -96,7 +97,7 @@ pub mod Runner {
                 };
                 if r_len != 0 {
                     atomic_u64_fetch_add!(offset_count_c, r_len as u64);
-                    pipe_writer.write_all(&p[0..r_len]).unwrap();
+                    pipe_writer.write_all(&p[0..r_len]).await.unwrap();
                 } else {
                     // todo
                     // 没有读取到,只有错误的时候没有读取到?
@@ -123,24 +124,22 @@ pub mod Runner {
                         }
                     };
                 }
-                // 防止空转
-                sleep(Duration::from_millis(5));
             }
         });
         // 全量阶段输出读取进度
-        spawn(move || loop {
-            let rrcc = atomic_u64_load!(rdb_read_count_c);
-            if rrcc < rdb_size as u64 {
+        spawn(move || {
+            loop{
+                let rrcc = atomic_u64_load!(rdb_read_count_c);
                 println!("[RDB] total bytes:{} byte, read: {} ", rdb_size, rrcc);
-            } else {
-                break;
+                if rrcc >= rdb_size as u64 {
+                    break;
+                }
+                sleep(Duration::from_secs(1))
             }
-            sleep(Duration::from_secs(1))
         });
-        loader.rdbReader.raw =
-            Rc::new(RefCell::new(pipe_reader_buf.get_mut().try_clone().unwrap()));
         //读取rdb文件的header
-        println!("rdb头部为 {:?}", loader.Header());
+        println!("读取RDB文件头部!");
+        println!("rdb头部为 {:?}", loader.Header().await);
         // 全量rdb的命令
         let (full_cmd_sender, full_cmd_receiver) = sync_channel::<Cmd>(20000);
         spawn(move || {
@@ -179,7 +178,7 @@ pub mod Runner {
                 };
             }
         });
-        full(&mut loader, &full_cmd_sender);
+        full(&mut loader, &full_cmd_sender).await.unwrap();
         // 等待RDB完成命令发送
         loop {
             let ird = is_rdb_done_c1.load(Ordering::Relaxed);
@@ -189,6 +188,6 @@ pub mod Runner {
                 break;
             }
         }
-        incr(&mut pipe_reader_buf, target_url, target_pass);
+        incr(&mut loader, target_url, target_pass).await.unwrap();
     }
 }

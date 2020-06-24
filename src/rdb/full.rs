@@ -19,9 +19,10 @@ use std::thread::{spawn};
 
 use crc64::Crc64;
 use time::{Time};
+use tokio::io::AsyncWriteExt;
 
 
-pub fn full(
+pub async fn full(
     loader: &mut Loader,
     full_cmd_sender:&SyncSender<Cmd>
 ) -> Result<(), Box<dyn Error>> {
@@ -38,7 +39,7 @@ pub fn full(
             IdleTime: 0,
             Freq: 0,
         };
-        match loader.NextBinEntry(&mut e) {
+        match loader.NextBinEntry(&mut e).await {
             Ok(()) => {
                 // 切换DB
                 if now_db_index != e.DB {
@@ -76,7 +77,7 @@ pub fn full(
             Err(e) => {
                 if e.to_string().eq("RDB END") {
                     println!("RDB END!");
-                    loader.Footer().unwrap();
+                    loader.Footer().await.unwrap();
                     break;
                 } else {
                     // todo 取消
@@ -87,11 +88,11 @@ pub fn full(
     };
     Ok(())
 }
-pub fn OverRestoreQuicklistEntry(
+pub async fn OverRestoreQuicklistEntry(
     e: &BinEntry,
     full_cmd_sender:&SyncSender<Cmd>
 ) -> Result<(), Box<dyn error::Error>> {
-    let (read, mut write) = os_pipe::pipe().unwrap();
+    let ( mut write,read) = async_pipe::pipe();
     let value = e.Value.clone();
     spawn(move||{
         write.write_all(value.as_slice());
@@ -106,24 +107,24 @@ pub fn OverRestoreQuicklistEntry(
         lastReadCount: 0,
         totMemberCount: 0,
     };
-    r.ReadByte()?;
-    let n = r.ReadLength()?;
+    r.ReadByte().await?;
+    let n = r.ReadLength().await?;
     for _ in 0..n {
-        let ziplist = r.ReadString()?;
+        let ziplist = r.ReadString().await?;
         let mut buf = sliceBuffer::new(ziplist);
-        let zln = r.ReadZiplistLength(&mut buf)?;
+        let zln = r.ReadZiplistLength(&mut buf).await?;
         for _ in 0..zln {
-            let entry = r.ReadZiplistEntry(&mut buf)?;
+            let entry = r.ReadZiplistEntry(&mut buf).await?;
             full_cmd_sender.send(redis::cmd("RPUSH").arg(e.Key.clone()).arg(0).arg(entry).to_owned());
         }
     }
     Ok(())
 }
-pub fn OverRestoreBigRdbEntry(
+pub async fn OverRestoreBigRdbEntry(
     e: &BinEntry,
     full_cmd_sender:&SyncSender<Cmd>
 ) -> Result<(), Box<dyn error::Error>> {
-    let (read, mut write) = os_pipe::pipe().unwrap();
+    let ( mut write,read) = async_pipe::pipe();
     let value = e.Value.clone();
     spawn(move||{
         write.write_all(value.as_slice());
@@ -138,12 +139,12 @@ pub fn OverRestoreBigRdbEntry(
         lastReadCount: 0,
         totMemberCount: 0,
     };
-    let t = r.ReadByte()?;
+    let t = r.ReadByte().await?;
     match t {
         loader::RdbTypeHashZiplist => {
-            let ziplist = r.ReadString()?;
+            let ziplist = r.ReadString().await?;
             let mut buf = sliceBuffer::new(ziplist);
-            let mut length = r.ReadZiplistLength(&mut buf)?;
+            let mut length = r.ReadZiplistLength(&mut buf).await?;
             length = length / 2;
             println!(
                 "restore big hash key {} field count {}",
@@ -151,15 +152,15 @@ pub fn OverRestoreBigRdbEntry(
                 length
             );
             for _ in 0..length {
-                let filed = r.ReadZiplistEntry(&mut buf)?;
-                let value = r.ReadZiplistEntry(&mut buf)?;
+                let filed = r.ReadZiplistEntry(&mut buf).await?;
+                let value = r.ReadZiplistEntry(&mut buf).await?;
                 full_cmd_sender.send(redis::cmd("HSET").arg(e.Key.clone()).arg(filed).arg(value).to_owned());
             }
         }
         loader::RdbTypeZSetZiplist => {
-            let ziplist = r.ReadString()?;
+            let ziplist = r.ReadString().await?;
             let mut buf = sliceBuffer::new(ziplist);
-            let mut cardinality = r.ReadZiplistLength(&mut buf)?;
+            let mut cardinality = r.ReadZiplistLength(&mut buf).await?;
             cardinality = cardinality / 2;
             println!(
                 "restore big zset key {} field count {}",
@@ -167,15 +168,15 @@ pub fn OverRestoreBigRdbEntry(
                 cardinality
             );
             for _ in 0..cardinality {
-                let member = r.ReadZiplistEntry(&mut buf)?;
-                let scoreBytes = r.ReadZiplistEntry(&mut buf)?;
+                let member = r.ReadZiplistEntry(&mut buf).await?;
+                let scoreBytes = r.ReadZiplistEntry(&mut buf).await?;
                 String::from_utf8_lossy(scoreBytes.clone().as_ref())
                     .parse::<f64>()?;
                 full_cmd_sender.send(redis::cmd("ZADD").arg(e.Key.clone()).arg(scoreBytes).arg(member).to_owned());
             }
         }
         loader::RdbTypeSetIntset => {
-            let intset = r.ReadString()?;
+            let intset = r.ReadString().await?;
             let mut buf = sliceBuffer::new(intset);
             let intSizeBytes = buf.Slice(4)?;
             let intSize = r.u32(intSizeBytes.as_slice());
@@ -209,26 +210,26 @@ pub fn OverRestoreBigRdbEntry(
             }
         }
         loader::RdbTypeListZiplist => {
-            let ziplist = r.ReadString()?;
+            let ziplist = r.ReadString().await?;
             let mut buf = sliceBuffer::new(ziplist);
-            let length = r.ReadZiplistLength(&mut buf)?;
+            let length = r.ReadZiplistLength(&mut buf).await?;
             println!(
                 "restore big list key {} field count {}",
                 String::from_utf8(e.Key.clone()).unwrap().as_str(),
                 length
             );
             for _ in 0..length {
-                let entry = r.ReadZiplistEntry(&mut buf)?;
+                let entry = r.ReadZiplistEntry(&mut buf).await?;
                 full_cmd_sender.send(redis::cmd("RPUSH").arg(e.Key.clone()).arg(entry).to_owned());
             }
         }
         loader::RdbTypeHashZipmap => {
             let mut length = 0;
-            let ziplist = r.ReadString()?;
+            let ziplist = r.ReadString().await?;
             let mut buf = sliceBuffer::new(ziplist);
-            let lenByte = r.ReadByte()?;
+            let lenByte = r.ReadByte().await?;
             if lenByte >= 254 {
-                length = r.CountZipmapItems(&mut buf)?;
+                length = r.CountZipmapItems(&mut buf).await?;
                 length = length / 2;
             } else {
                 length = lenByte as i32;
@@ -239,53 +240,53 @@ pub fn OverRestoreBigRdbEntry(
                 length
             );
             for _ in 0..length {
-                let field = r.ReadZipmapItem(&mut buf, false)?;
-                let value = r.ReadZipmapItem(&mut buf, true)?;
+                let field = r.ReadZipmapItem(&mut buf, false).await?;
+                let value = r.ReadZipmapItem(&mut buf, true).await?;
                 full_cmd_sender.send(redis::cmd("HSET").arg(e.Key.clone()).arg(field).arg(value).to_owned());
             }
         }
         loader::RdbTypeString => {
-            let value = r.ReadString()?;
+            let value = r.ReadString().await?;
             full_cmd_sender.send(redis::cmd("SET").arg(e.Key.clone()).arg(value).to_owned());
         }
         loader::RdbTypeList => {
-            let n = r.ReadLength()?;
+            let n = r.ReadLength().await?;
             println!(
                 "restore big list key {} field count {}",
                 String::from_utf8(e.Key.clone()).unwrap().as_str(),
                 n
             );
             for _ in 0..n {
-                let field = r.ReadString()?;
+                let field = r.ReadString().await?;
                 full_cmd_sender.send(redis::cmd("RPUSH").arg(e.Key.clone()).arg(field).to_owned());
             }
         }
         loader::RdbTypeSet => {
-            let n = r.ReadLength()?;
+            let n = r.ReadLength().await?;
             println!(
                 "restore big set key {} field count {}",
                 String::from_utf8(e.Key.clone()).unwrap().as_str(),
                 n
             );
             for _ in 0..n {
-                let member = r.ReadString()?;
+                let member = r.ReadString().await?;
                 full_cmd_sender.send(redis::cmd("SADD").arg(e.Key.clone()).arg(member).to_owned());
             }
         }
         loader::RdbTypeZSet | loader::RdbTypeZSet2 => {
-            let n = r.ReadLength()?;
+            let n = r.ReadLength().await?;
             println!(
                 "restore big zset key {} field count {}",
                 String::from_utf8(e.Key.clone()).unwrap().as_str(),
                 n
             );
             for _ in 0..n {
-                let member = r.ReadString()?;
+                let member = r.ReadString().await?;
                 let score;
                 if t == loader::RdbTypeZSet2 {
-                    score = r.ReadDouble()?;
+                    score = r.ReadDouble().await?;
                 } else {
-                    score = r.ReadFloat()?;
+                    score = r.ReadFloat().await?;
                 }
                 println!(
                     "restore zset key {} field count {} member {}",
@@ -299,7 +300,7 @@ pub fn OverRestoreBigRdbEntry(
         loader::RdbTypeHash => {
             let n;
             if e.NeedReadLen == 1 {
-                let rlen = r.ReadLength()?;
+                let rlen = r.ReadLength().await?;
                 if e.RealMemberCount != 0 {
                     n = e.RealMemberCount
                 } else {
@@ -314,19 +315,19 @@ pub fn OverRestoreBigRdbEntry(
                 n
             );
             for _ in 0..n {
-                let field = r.ReadString()?;
-                let value = r.ReadString()?;
+                let field = r.ReadString().await?;
+                let value = r.ReadString().await?;
                 full_cmd_sender.send( redis::cmd("HSET").arg(e.Key.clone()).arg(field).arg(value).to_owned());
             }
         }
         loader::RdbTypeQuicklist => {
-            let n = r.ReadLength()?;
+            let n = r.ReadLength().await?;
             for _ in 0..n {
-                let ziplist = r.ReadString()?;
+                let ziplist = r.ReadString().await?;
                 let mut buf = sliceBuffer::new(ziplist);
-                let zln = r.ReadLength()?;
+                let zln = r.ReadLength().await?;
                 for _ in 0..zln {
-                    let entry = r.ReadZiplistEntry(&mut buf)?;
+                    let entry = r.ReadZiplistEntry(&mut buf).await?;
                     full_cmd_sender.send(redis::cmd("RPUSH").arg(e.Key.clone()).arg(entry).to_owned());
                 }
             }

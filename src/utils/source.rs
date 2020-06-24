@@ -109,7 +109,7 @@ pub async fn report_offset(
 #[macro_export(source_report_offset)]
 macro_rules! source_report_offset {
     ($conn:ident,$offset:ident) => {
-        spawn(move || async move {
+        async_std::task::spawn(async move {
             // 上报头部
             loop {
                 if let Err(e) = report_offset(&mut $conn, &$offset).await {

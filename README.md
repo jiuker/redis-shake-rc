@@ -14,3 +14,4 @@
     echo 'net.core.wmem_max=24751296' >> /etc/sysctl.conf
     sysctl -p
     即可调高tcp流量
+    此版本为异步版本,性能超过go版本不少

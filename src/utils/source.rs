@@ -1,5 +1,5 @@
 
-use std::convert::TryFrom;
+
 use std::error;
 
 use async_std::net::TcpStream;
@@ -52,7 +52,7 @@ pub async fn pre_to_rdb(source: &mut TcpStream) -> Result<(i64, i64, String), Bo
 
             }
         },
-        Err(e)=>{
+        Err(_e)=>{
 
         }
     };
@@ -85,7 +85,7 @@ pub async fn pre_to_inc(
 
             }
         },
-        Err(e)=>{
+        Err(_e)=>{
 
         }
     };

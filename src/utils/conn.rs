@@ -1,12 +1,12 @@
 use crate::utils::cmd::cmd_to_resp_first_line;
 use net2::TcpStreamExt;
 use redis::{Client, Connection};
-use std::convert::TryFrom;
+
 use std::error::Error;
 use std::ops::Add;
-use std::time::Duration;
+
 use async_std::net::TcpStream;
-use async_std::future::Future;
+
 
 pub async fn open_tcp_conn(url: &str, pass: &str) ->  Result<TcpStream, Box<dyn Error>>{
     let mut source = TcpStream::connect(url).await?;

@@ -3,7 +3,7 @@ use byteorder::{LittleEndian, WriteBytesExt};
 use crc64::Crc64;
 
 use std::cell::{RefCell};
-use std::convert::TryFrom;
+
 use std::error::Error;
 use std::f32::INFINITY;
 use std::f64::{NAN, NEG_INFINITY};
@@ -11,7 +11,7 @@ use std::io::{Read, Write};
 
 use std::rc::Rc;
 use tokio::io::AsyncReadExt;
-use futures_util::TryFutureExt;
+
 
 pub struct Loader {
     pub rdbReader: rdbReader,

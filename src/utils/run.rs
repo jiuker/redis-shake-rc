@@ -7,9 +7,9 @@ pub mod Runner {
     use crate::{atomic_u64_fetch_add, atomic_u64_load, source_report_offset};
     use redis::{Cmd, Value};
     use std::cell::RefCell;
-    use std::io::{BufReader, Write};
-    use async_std::io::{Read as AsyncRead,Write as AsyncWrite};
-    use std::ops::Sub;
+    use std::io::{Write};
+    
+    
     use std::process::exit;
     use std::rc::Rc;
     use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -18,12 +18,12 @@ pub mod Runner {
     use async_std::task::sleep;
     use async_std::task::spawn;
     use std::time::Duration;
-    use time::Time;
-    use async_std::future::Future;
-    use std::error::Error;
+    
+    
+    
     use futures_util::AsyncReadExt;
-    use std::ptr::null;
-    use tokio::io::{BufWriter, AsyncWriteExt};
+    
+    use tokio::io::{AsyncWriteExt};
 
     pub async fn mod_full(
         source_url: &'static str,
@@ -36,7 +36,7 @@ pub mod Runner {
         let (offset, rdb_size, uuid) = pre_to_rdb(&mut source).await.unwrap();
 
         // 带缓存的管道
-        let (mut pipe_writer, mut pipe_reader) = async_pipe::pipe();
+        let (mut pipe_writer, pipe_reader) = async_pipe::pipe();
 
         let mut loader = Loader::new(Rc::new(RefCell::new(pipe_reader)));
 

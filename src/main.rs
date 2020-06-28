@@ -1,5 +1,5 @@
 use redis_shake_rs::utils::run::Runner;
-use std::error::Error;
+
 use async_std::task;
 fn main() {
     println!("Started task!");

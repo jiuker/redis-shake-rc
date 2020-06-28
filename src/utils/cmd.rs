@@ -2,7 +2,7 @@ use std::convert::AsRef;
 use std::error::Error;
 use async_std::net::TcpStream;
 use std::ops::Add;
-use async_std::future::Future;
+
 use futures_util::{AsyncWriteExt,AsyncReadExt};
 
 pub fn cmd_to_string(cmd: Vec<&str>) -> String {
@@ -36,7 +36,7 @@ pub async fn cmd_to_resp_first_line(
                 }
                 resp.push(char::from(resp_char[0]));
             },
-            Err(e)=>{
+            Err(_e)=>{
                 break;
             }
         };
@@ -58,7 +58,7 @@ pub async fn read_line(conn: &mut TcpStream) -> Result<String, Box<dyn Error>> {
                 }
                 resp.push(char::from(resp_char[0]));
             },
-            Err(e)=>{
+            Err(_e)=>{
                 break;
             }
         };

@@ -15,7 +15,7 @@ pub mod Runner {
     use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
     use std::sync::mpsc::{sync_channel, RecvTimeoutError};
     use std::sync::Arc;
-    use std::thread::{sleep};
+    use async_std::task::sleep;
     use async_std::task::spawn;
     use std::time::Duration;
     use time::Time;
@@ -51,10 +51,10 @@ pub mod Runner {
         let offset_count_c = offset_count.clone();
         // 读取源端数据
         spawn(async move {
-            sleep(Duration::from_secs(1));
+            sleep(Duration::from_secs(1)).await;
             let mut source_c = source.clone();
             source_report_offset!(source_c, offset_count);
-            let mut p = [0; 1024];
+            let mut p = [0; 64*1024];
             // 全量的数据
             loop {
                 let r_len = match source.read(&mut p).await {
@@ -81,7 +81,7 @@ pub mod Runner {
             loop {
                 let ird = is_rdb_done.load(Ordering::Relaxed);
                 if !ird {
-                    sleep(Duration::from_millis(100))
+                    sleep(Duration::from_millis(100)).await
                 } else {
                     break;
                 }
@@ -134,7 +134,7 @@ pub mod Runner {
                 if rrcc >= rdb_size as u64 {
                     break;
                 }
-                sleep(Duration::from_secs(1))
+                sleep(Duration::from_secs(1)).await
             }
         });
         //读取rdb文件的header
@@ -183,7 +183,7 @@ pub mod Runner {
         loop {
             let ird = is_rdb_done_c1.load(Ordering::Relaxed);
             if !ird {
-                sleep(Duration::from_millis(100))
+                sleep(Duration::from_millis(100)).await
             } else {
                 break;
             }

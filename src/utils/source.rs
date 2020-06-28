@@ -7,7 +7,7 @@ use async_std::net::TcpStream;
 use crate::utils::cmd::{cmd_to_resp_first_line, cmd_to_string, read_line};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use std::thread::sleep;
+use async_std::task::sleep;
 use std::time::Duration;
 use futures_util::{AsyncWriteExt, AsyncReadExt};
 
@@ -102,7 +102,7 @@ pub async fn report_offset(
         source.write(
             cmd_to_string(vec!["replconf", "ack", format!("{}", send_offset).as_str()]).as_bytes(),
         ).await?;
-        sleep(Duration::from_secs(1));
+        sleep(Duration::from_secs(1)).await;
     }
     Ok(())
 }

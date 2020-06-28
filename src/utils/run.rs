@@ -54,7 +54,7 @@ pub mod Runner {
             sleep(Duration::from_secs(1)).await;
             let mut source_c = source.clone();
             source_report_offset!(source_c, offset_count);
-            let mut p = [0; 64*1024];
+            let mut p = [0; 256*1024];
             // 全量的数据
             loop {
                 let r_len = match source.read(&mut p).await {

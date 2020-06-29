@@ -9,22 +9,22 @@ use std::cell::RefCell;
 use std::error;
 use std::error::Error;
 
-use std::io::Write;
 
 use std::rc::Rc;
 
-use std::sync::mpsc::{SyncSender};
-
+use tokio::sync::mpsc::{Sender};
 use async_std::task::spawn;
 
 use crc64::Crc64;
 use time::{Time};
 use tokio::io::AsyncWriteExt;
+use std::sync::atomic::AtomicU64;
+use std::sync::Arc;
 
 
 pub async fn full(
     loader: &mut Loader,
-    full_cmd_sender:&SyncSender<Cmd>
+    full_cmd_sender: &mut Sender<Cmd>,
 ) -> Result<(), Box<dyn Error>> {
     let mut now_db_index = 0;
     loop {
@@ -44,22 +44,22 @@ pub async fn full(
                 // 切换DB
                 if now_db_index != e.DB {
                     now_db_index = e.DB;
-                    full_cmd_sender.send(redis::cmd("SELECT").arg(e.DB).to_owned());
+                    full_cmd_sender.send(redis::cmd("SELECT").arg(e.DB).to_owned()).await;
                 };
                 if e.Type == RdbTypeQuicklist {
-                    full_cmd_sender.send(redis::cmd("DEL").arg(e.Key.clone()).to_owned());
-                    OverRestoreQuicklistEntry(&e,&full_cmd_sender);
+                    full_cmd_sender.send(redis::cmd("DEL").arg(e.Key.clone()).to_owned()).await;
+                    OverRestoreQuicklistEntry(&e,full_cmd_sender);
                     if e.ExpireAt != 0 {
-                        full_cmd_sender.send( redis::cmd("EXPIREAT").arg(e.Key.clone()).arg(e.ExpireAt).to_owned());
+                        full_cmd_sender.send( redis::cmd("EXPIREAT").arg(e.Key.clone()).arg(e.ExpireAt).to_owned()).await;
                     }
                 } else if e.Type == RdbFlagAUX
                     && String::from_utf8_lossy(e.Key.clone().as_slice()).eq("lua")
                 {
-                    full_cmd_sender.send( redis::cmd("SCRIPT").arg("load").arg(e.Value).to_owned());
+                    full_cmd_sender.send( redis::cmd("SCRIPT").arg("load").arg(e.Value).to_owned()).await;
                 } else if e.Type != RDBTypeStreamListPacks
                     && (e.Value.len() >= 10*1024*1024 || e.RealMemberCount != 0)
                 {
-                    OverRestoreBigRdbEntry(&e,&full_cmd_sender);
+                    OverRestoreBigRdbEntry(&e,full_cmd_sender);
                 } else {
                     let mut ttlms = 0;
                     if e.ExpireAt != 0{
@@ -70,8 +70,8 @@ pub async fn full(
                             ttlms = e.ExpireAt - now as u64
                         }
                     }
-                    full_cmd_sender.send(redis::cmd("DEL").arg(e.Key.clone()).to_owned());
-                    full_cmd_sender.send(redis::cmd("RESTORE").arg(e.Key).arg(ttlms).arg(e.Value).to_owned());
+                    full_cmd_sender.send(redis::cmd("DEL").arg(e.Key.clone()).to_owned()).await;
+                    full_cmd_sender.send(redis::cmd("RESTORE").arg(e.Key).arg(ttlms).arg(e.Value).to_owned()).await;
                 }
             }
             Err(e) => {
@@ -90,7 +90,7 @@ pub async fn full(
 }
 pub async fn OverRestoreQuicklistEntry(
     e: &BinEntry,
-    full_cmd_sender:&SyncSender<Cmd>
+    full_cmd_sender: &mut Sender<Cmd>
 ) -> Result<(), Box<dyn error::Error>> {
     let ( mut write,read) = async_pipe::pipe();
     let value = e.Value.clone();
@@ -115,14 +115,14 @@ pub async fn OverRestoreQuicklistEntry(
         let zln = r.ReadZiplistLength(&mut buf).await?;
         for _ in 0..zln {
             let entry = r.ReadZiplistEntry(&mut buf).await?;
-            full_cmd_sender.send(redis::cmd("RPUSH").arg(e.Key.clone()).arg(0).arg(entry).to_owned());
+            full_cmd_sender.send(redis::cmd("RPUSH").arg(e.Key.clone()).arg(0).arg(entry).to_owned()).await;
         }
     }
     Ok(())
 }
 pub async fn OverRestoreBigRdbEntry(
     e: &BinEntry,
-    full_cmd_sender:&SyncSender<Cmd>
+    full_cmd_sender: &mut Sender<Cmd>
 ) -> Result<(), Box<dyn error::Error>> {
     let ( mut write,read) = async_pipe::pipe();
     let value = e.Value.clone();
@@ -154,7 +154,7 @@ pub async fn OverRestoreBigRdbEntry(
             for _ in 0..length {
                 let filed = r.ReadZiplistEntry(&mut buf).await?;
                 let value = r.ReadZiplistEntry(&mut buf).await?;
-                full_cmd_sender.send(redis::cmd("HSET").arg(e.Key.clone()).arg(filed).arg(value).to_owned());
+                full_cmd_sender.send(redis::cmd("HSET").arg(e.Key.clone()).arg(filed).arg(value).to_owned()).await;
             }
         }
         loader::RdbTypeZSetZiplist => {
@@ -172,7 +172,7 @@ pub async fn OverRestoreBigRdbEntry(
                 let scoreBytes = r.ReadZiplistEntry(&mut buf).await?;
                 String::from_utf8_lossy(scoreBytes.clone().as_ref())
                     .parse::<f64>()?;
-                full_cmd_sender.send(redis::cmd("ZADD").arg(e.Key.clone()).arg(scoreBytes).arg(member).to_owned());
+                full_cmd_sender.send(redis::cmd("ZADD").arg(e.Key.clone()).arg(scoreBytes).arg(member).to_owned()).await;
             }
         }
         loader::RdbTypeSetIntset => {
@@ -206,7 +206,7 @@ pub async fn OverRestoreBigRdbEntry(
                     }
                     _ => {}
                 }
-                full_cmd_sender.send(redis::cmd("SADD").arg(e.Key.clone()).arg(intString).to_owned());
+                full_cmd_sender.send(redis::cmd("SADD").arg(e.Key.clone()).arg(intString).to_owned()).await;
             }
         }
         loader::RdbTypeListZiplist => {
@@ -220,7 +220,7 @@ pub async fn OverRestoreBigRdbEntry(
             );
             for _ in 0..length {
                 let entry = r.ReadZiplistEntry(&mut buf).await?;
-                full_cmd_sender.send(redis::cmd("RPUSH").arg(e.Key.clone()).arg(entry).to_owned());
+                full_cmd_sender.send(redis::cmd("RPUSH").arg(e.Key.clone()).arg(entry).to_owned()).await;
             }
         }
         loader::RdbTypeHashZipmap => {
@@ -242,12 +242,12 @@ pub async fn OverRestoreBigRdbEntry(
             for _ in 0..length {
                 let field = r.ReadZipmapItem(&mut buf, false).await?;
                 let value = r.ReadZipmapItem(&mut buf, true).await?;
-                full_cmd_sender.send(redis::cmd("HSET").arg(e.Key.clone()).arg(field).arg(value).to_owned());
+                full_cmd_sender.send(redis::cmd("HSET").arg(e.Key.clone()).arg(field).arg(value).to_owned()).await;
             }
         }
         loader::RdbTypeString => {
             let value = r.ReadString().await?;
-            full_cmd_sender.send(redis::cmd("SET").arg(e.Key.clone()).arg(value).to_owned());
+            full_cmd_sender.send(redis::cmd("SET").arg(e.Key.clone()).arg(value).to_owned()).await;
         }
         loader::RdbTypeList => {
             let n = r.ReadLength().await?;
@@ -258,7 +258,7 @@ pub async fn OverRestoreBigRdbEntry(
             );
             for _ in 0..n {
                 let field = r.ReadString().await?;
-                full_cmd_sender.send(redis::cmd("RPUSH").arg(e.Key.clone()).arg(field).to_owned());
+                full_cmd_sender.send(redis::cmd("RPUSH").arg(e.Key.clone()).arg(field).to_owned()).await;
             }
         }
         loader::RdbTypeSet => {
@@ -270,7 +270,7 @@ pub async fn OverRestoreBigRdbEntry(
             );
             for _ in 0..n {
                 let member = r.ReadString().await?;
-                full_cmd_sender.send(redis::cmd("SADD").arg(e.Key.clone()).arg(member).to_owned());
+                full_cmd_sender.send(redis::cmd("SADD").arg(e.Key.clone()).arg(member).to_owned()).await;
             }
         }
         loader::RdbTypeZSet | loader::RdbTypeZSet2 => {
@@ -294,7 +294,7 @@ pub async fn OverRestoreBigRdbEntry(
                     score,
                     String::from_utf8(member.clone()).unwrap().as_str()
                 );
-                full_cmd_sender.send( redis::cmd("ZADD").arg(e.Key.clone()).arg(score).arg(member).to_owned());
+                full_cmd_sender.send( redis::cmd("ZADD").arg(e.Key.clone()).arg(score).arg(member).to_owned()).await;
             }
         }
         loader::RdbTypeHash => {
@@ -317,7 +317,7 @@ pub async fn OverRestoreBigRdbEntry(
             for _ in 0..n {
                 let field = r.ReadString().await?;
                 let value = r.ReadString().await?;
-                full_cmd_sender.send( redis::cmd("HSET").arg(e.Key.clone()).arg(field).arg(value).to_owned());
+                full_cmd_sender.send( redis::cmd("HSET").arg(e.Key.clone()).arg(field).arg(value).to_owned()).await;
             }
         }
         loader::RdbTypeQuicklist => {
@@ -328,7 +328,7 @@ pub async fn OverRestoreBigRdbEntry(
                 let zln = r.ReadLength().await?;
                 for _ in 0..zln {
                     let entry = r.ReadZiplistEntry(&mut buf).await?;
-                    full_cmd_sender.send(redis::cmd("RPUSH").arg(e.Key.clone()).arg(entry).to_owned());
+                    full_cmd_sender.send(redis::cmd("RPUSH").arg(e.Key.clone()).arg(entry).to_owned()).await;
                 }
             }
         }

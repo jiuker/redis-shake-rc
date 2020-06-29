@@ -13,7 +13,6 @@ pub mod Runner {
     use std::process::exit;
     use std::rc::Rc;
     use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-    use std::sync::mpsc::{sync_channel, RecvTimeoutError};
     use std::sync::Arc;
     use async_std::task::sleep;
     use async_std::task::spawn;
@@ -24,6 +23,8 @@ pub mod Runner {
     use futures_util::AsyncReadExt;
     
     use tokio::io::{AsyncWriteExt};
+    use tokio::sync::mpsc::channel;
+    use tokio::sync::mpsc::error::TryRecvError;
 
     pub async fn mod_full(
         source_url: &'static str,
@@ -31,7 +32,6 @@ pub mod Runner {
         target_url: &'static str,
         target_pass: &'static str,
     ) {
-
         let mut source = open_tcp_conn(source_url, source_pass).await.unwrap();
         let (offset, rdb_size, uuid) = pre_to_rdb(&mut source).await.unwrap();
 
@@ -141,14 +141,13 @@ pub mod Runner {
         println!("读取RDB文件头部!");
         println!("rdb头部为 {:?}", loader.Header().await);
         // 全量rdb的命令
-        let (full_cmd_sender, full_cmd_receiver) = sync_channel::<Cmd>(20000);
+        let (mut full_cmd_sender, mut full_cmd_receiver) = channel::<Cmd>(20000);
         spawn(async move {
             let mut pipe = redis::pipe();
             let mut full_cmd_count = 0;
             let mut target_conn = open_redis_conn(target_url, target_pass, "").unwrap();
-            let dur = Duration::from_secs(1);
             loop {
-                match full_cmd_receiver.recv_timeout(dur) {
+                match full_cmd_receiver.try_recv() {
                     Ok(cmd) => {
                         full_cmd_count = full_cmd_count + 1;
                         pipe.add_command(cmd);
@@ -160,25 +159,28 @@ pub mod Runner {
                     }
                     Err(e) => {
                         match e {
-                            RecvTimeoutError::Timeout => {
+                            TryRecvError::Empty=>{
+                                if full_cmd_count==0{
+                                    // 认为rdb完成了
+                                    is_rdb_done_c.store(true, Ordering::Release);
+                                }
                                 if full_cmd_count > 0 {
                                     pipe.query::<Value>(&mut target_conn).unwrap();
                                     pipe.clear();
                                     full_cmd_count = 0;
                                 };
-                                // 认为rdb完成了
-                                is_rdb_done_c.store(true, Ordering::Release);
                                 break;
-                            }
-                            RecvTimeoutError::Disconnected => {
-                                println!("dis is {}", e);
+                            },
+                            TryRecvError::Closed=>{
+                                unimplemented!("RDB channel close!")
                             }
                         }
+
                     }
                 };
             }
         });
-        full(&mut loader, &full_cmd_sender).await.unwrap();
+        full(&mut loader, &mut full_cmd_sender).await.unwrap();
         // 等待RDB完成命令发送
         loop {
             let ird = is_rdb_done_c1.load(Ordering::Relaxed);

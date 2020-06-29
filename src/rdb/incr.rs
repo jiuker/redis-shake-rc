@@ -6,9 +6,9 @@ use std::io::{BufReader, Read, Write};
 
 use crate::utils::conn::open_redis_conn;
 use std::sync::atomic::{AtomicPtr, AtomicU64, AtomicUsize, Ordering};
-use std::sync::mpsc::sync_channel;
+use tokio::sync::mpsc::channel;
 use std::sync::Arc;
-use std::thread::{sleep, spawn};
+use async_std::task::{spawn,sleep};
 use std::time::Duration;
 use crate::rdb::loader::Loader;
 use tokio::io::AsyncReadExt;
@@ -51,14 +51,14 @@ pub async fn incr(
     target_url: &'static str,
     target_pass: &'static str,
 ) -> Result<(), Box<dyn Error>> {
-    let (sender, receiver) = sync_channel::<cmd_pack>(20000);
+    let (mut sender, mut receiver) = channel::<cmd_pack>(20000);
     let send_count = Arc::new(AtomicU64::new(0));
     let send_count_c = send_count.clone();
     let parse_count = Arc::new(AtomicU64::new(0));
     let parse_count_c = parse_count.clone();
     let count_all_bytes = Arc::new(AtomicU64::new(0));
     let count_all_bytes_c = count_all_bytes.clone();
-    spawn(move || {
+    spawn(async move {
         loop {
             let cabc = atomic_u64_load!(count_all_bytes);
             let pcc = atomic_u64_load!(parse_count_c);
@@ -71,11 +71,11 @@ pub async fn incr(
                 cabc
             );
             // 清零
-            sleep(Duration::from_secs(1));
+            sleep(Duration::from_secs(1)).await;
         }
     });
     // 发送
-    spawn(move || {
+    spawn(async move  {
         let time_out = Duration::from_millis(10);
         let mut req_packed: Vec<u8> = vec![];
         let mut batch_count = 0;
@@ -106,8 +106,8 @@ pub async fn incr(
                 break;
             }
             loop {
-                match receiver.recv_timeout(time_out) {
-                    Ok(mut cmd) => {
+                match receiver.recv().await {
+                    Some(mut cmd) => {
                         // 先查看是不是select
                         if String::from_utf8_lossy(cmd.cmd.as_ref())
                             .to_lowercase()
@@ -122,7 +122,7 @@ pub async fn incr(
                         batch_count = batch_count + 1;
                         send_cmd!(conn, req_packed, send_count, batch_count, 300);
                     }
-                    Err(_e) => {
+                    None => {
                         send_cmd!(conn, req_packed, send_count, batch_count, 0);
                     }
                 }
@@ -197,7 +197,7 @@ pub async fn incr(
                 // 统计全部
                 atomic_u64_fetch_add!(count_all_bytes_c, pack.full_pack.len() as u64);
                 // 发送
-                sender.send(pack);
+                sender.send(pack).await;
             } else {
                 print!("{}", p[0] as char);
             }

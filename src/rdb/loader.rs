@@ -7,7 +7,7 @@ use std::cell::{RefCell};
 use std::error::Error;
 use std::f32::INFINITY;
 use std::f64::{NAN, NEG_INFINITY};
-use std::io::{Read, Write};
+use std::io::{ Write};
 
 use std::rc::Rc;
 use tokio::io::AsyncReadExt;

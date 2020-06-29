@@ -76,7 +76,6 @@ pub async fn incr(
     });
     // 发送
     spawn(async move  {
-        let time_out = Duration::from_millis(10);
         let mut req_packed: Vec<u8> = vec![];
         let mut batch_count = 0;
         let mut conn: Connection;

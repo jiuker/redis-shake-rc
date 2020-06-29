@@ -12,7 +12,7 @@ pub mod Runner {
     
     use std::process::exit;
     use std::rc::Rc;
-    use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+    use std::sync::atomic::{AtomicU64, Ordering};
     use std::sync::Arc;
     use async_std::task::sleep;
     use async_std::task::spawn;

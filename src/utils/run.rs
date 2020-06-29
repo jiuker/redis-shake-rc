@@ -42,10 +42,10 @@ pub mod Runner {
 
         let rdb_read_count = Arc::new(AtomicU64::new(0));
         let rdb_read_count_c = rdb_read_count.clone();
-
-        let is_rdb_done = Arc::new(AtomicBool::new(false));
-        let is_rdb_done_c = is_rdb_done.clone();
-        let is_rdb_done_c1 = is_rdb_done_c.clone();
+        // rdb_status 0 reading, 1 read done,2 send done
+        let rdb_status = Arc::new(AtomicU64::new(0));
+        let rdb_status_c = rdb_status.clone();
+        let rdb_status_c1 = rdb_status_c.clone();
         // offset
         let offset_count = Arc::new(AtomicU64::new(offset as u64));
         let offset_count_c = offset_count.clone();
@@ -78,9 +78,10 @@ pub mod Runner {
             let rrc = atomic_u64_load!(rdb_read_count);
             atomic_u64_fetch_add!(offset_count_c, rrc - rdb_size as u64);
             println!("停止读取RDB!");
+            atomic_u64_fetch_add!(rdb_status,1);
             loop {
-                let ird = is_rdb_done.load(Ordering::Relaxed);
-                if !ird {
+                let ird = atomic_u64_load!(rdb_status);
+                if ird!=2 {
                     sleep(Duration::from_millis(100)).await
                 } else {
                     break;
@@ -160,16 +161,19 @@ pub mod Runner {
                     Err(e) => {
                         match e {
                             TryRecvError::Empty=>{
-                                if full_cmd_count==0{
-                                    // 认为rdb完成了
-                                    is_rdb_done_c.store(true, Ordering::Release);
+                                if atomic_u64_load!(rdb_status_c)==1{
+                                    if full_cmd_count==0{
+                                        // 认为rdb完成了
+                                        atomic_u64_fetch_add!(rdb_status_c,1);
+                                        break;
+                                    }
                                 }
                                 if full_cmd_count > 0 {
                                     pipe.query::<Value>(&mut target_conn).unwrap();
                                     pipe.clear();
                                     full_cmd_count = 0;
                                 };
-                                break;
+                                sleep(Duration::from_millis(100)).await;
                             },
                             TryRecvError::Closed=>{
                                 unimplemented!("RDB channel close!")
@@ -183,8 +187,8 @@ pub mod Runner {
         full(&mut loader, &mut full_cmd_sender).await.unwrap();
         // 等待RDB完成命令发送
         loop {
-            let ird = is_rdb_done_c1.load(Ordering::Relaxed);
-            if !ird {
+            let ird = atomic_u64_load!(rdb_status_c1);
+            if ird!=2 {
                 sleep(Duration::from_millis(100)).await
             } else {
                 break;

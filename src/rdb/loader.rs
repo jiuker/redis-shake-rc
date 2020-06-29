@@ -10,7 +10,8 @@ use std::f64::{NAN, NEG_INFINITY};
 use std::io::{ Write};
 
 use std::rc::Rc;
-use tokio::io::AsyncReadExt;
+use tokio::io::{AsyncReadExt, BufReader};
+use async_pipe::PipeReader;
 
 
 pub struct Loader {
@@ -73,7 +74,7 @@ pub const rdbZiplistInt24: u8 = 0xf0;
 pub const rdbZiplistInt8: u8 = 0xfe;
 pub const rdbZiplistInt4: u8 = 15;
 impl Loader {
-    pub fn new(r: Rc<RefCell<async_pipe::PipeReader>>) -> Loader {
+    pub fn new(r: Rc<RefCell<BufReader<PipeReader>>>) -> Loader {
         Loader {
             rdbReader: rdbReader {
                 raw: r,
@@ -235,7 +236,7 @@ pub struct BinEntry {
     pub Freq: u8,
 }
 pub struct rdbReader {
-    pub raw: Rc<RefCell<async_pipe::PipeReader>>,
+    pub raw: Rc<RefCell<BufReader<PipeReader>>>,
     pub crc64:Crc64,
     pub is_cache_buf:bool,
     pub buf: Vec<u8>,

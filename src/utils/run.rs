@@ -22,7 +22,7 @@ pub mod Runner {
     
     use futures_util::AsyncReadExt;
     
-    use tokio::io::{AsyncWriteExt};
+    use tokio::io::{AsyncWriteExt, BufReader};
     use tokio::sync::mpsc::channel;
     use tokio::sync::mpsc::error::TryRecvError;
 
@@ -37,8 +37,8 @@ pub mod Runner {
 
         // 带缓存的管道
         let (mut pipe_writer, pipe_reader) = async_pipe::pipe();
-
-        let mut loader = Loader::new(Rc::new(RefCell::new(pipe_reader)));
+        let pipe_reader_buf = BufReader::with_capacity(10*1024*1024,pipe_reader);
+        let mut loader = Loader::new(Rc::new(RefCell::new(pipe_reader_buf)));
 
         let rdb_read_count = Arc::new(AtomicU64::new(0));
         let rdb_read_count_c = rdb_read_count.clone();

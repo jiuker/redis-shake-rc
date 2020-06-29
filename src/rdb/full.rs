@@ -17,7 +17,7 @@ use async_std::task::spawn;
 
 use crc64::Crc64;
 use time::{Time};
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncWriteExt, BufReader};
 
 
 
@@ -98,7 +98,7 @@ pub async fn OverRestoreQuicklistEntry(
         write.write_all(value.as_slice()).await.unwrap();
     });
     let mut r = rdbReader {
-        raw: Rc::new(RefCell::new(read)),
+        raw: Rc::new(RefCell::new(BufReader::new(read))),
         crc64:Crc64::new(),
         is_cache_buf: false,
         buf: vec![],
@@ -130,7 +130,7 @@ pub async fn OverRestoreBigRdbEntry(
         write.write_all(value.as_slice()).await.unwrap();
     });
     let mut r = rdbReader {
-        raw: Rc::new(RefCell::new(read)),
+        raw: Rc::new(RefCell::new(BufReader::new(read))),
         is_cache_buf: false,
         buf: vec![],
         crc64:Crc64::new(),

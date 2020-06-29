@@ -64,7 +64,7 @@ pub async fn incr(
             let pcc = atomic_u64_load!(parse_count_c);
             let scc = atomic_u64_load!(send_count_c);
             println!(
-                "[INC] parse_cmd_number:{},send_cmd_number:{},left:{} all bytes:{}",
+                "[INC] parse_cmd_number:{} send_cmd_number:{} left:{:>5} all bytes:{}",
                 pcc,
                 scc,
                 pcc - scc,

@@ -2,7 +2,7 @@ pub mod Runner {
     use crate::rdb::full::full;
     use crate::rdb::incr::incr;
     use crate::rdb::loader::Loader;
-    use crate::utils::conn::{open_redis_conn, open_tcp_conn, open_redis_sync_conn};
+    use crate::utils::conn::{open_tcp_conn, open_redis_sync_conn};
     use crate::utils::source::{pre_to_inc, pre_to_rdb, report_offset};
     use crate::{atomic_u64_fetch_add, atomic_u64_load, source_report_offset};
     use redis::{Cmd, Value, RedisResult};

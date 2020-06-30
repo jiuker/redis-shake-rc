@@ -2,10 +2,10 @@ pub mod Runner {
     use crate::rdb::full::full;
     use crate::rdb::incr::incr;
     use crate::rdb::loader::Loader;
-    use crate::utils::conn::{open_redis_conn, open_tcp_conn};
+    use crate::utils::conn::{open_redis_conn, open_tcp_conn, open_redis_sync_conn};
     use crate::utils::source::{pre_to_inc, pre_to_rdb, report_offset};
     use crate::{atomic_u64_fetch_add, atomic_u64_load, source_report_offset};
-    use redis::{Cmd, Value};
+    use redis::{Cmd, Value, RedisResult};
     use std::cell::RefCell;
     use std::io::{Write};
     
@@ -146,14 +146,14 @@ pub mod Runner {
         spawn(async move {
             let mut pipe = redis::pipe();
             let mut full_cmd_count = 0;
-            let mut target_conn = open_redis_conn(target_url, target_pass, "").unwrap();
+            let mut target_conn = open_redis_sync_conn(target_url, target_pass, "").await.unwrap();
             loop {
                 match full_cmd_receiver.try_recv() {
                     Ok(cmd) => {
                         full_cmd_count = full_cmd_count + 1;
                         pipe.add_command(cmd);
                         if full_cmd_count >= 300 {
-                            pipe.query::<Value>(&mut target_conn).unwrap();
+                            let result:RedisResult<Value> = pipe.query_async(&mut target_conn).await;
                             pipe.clear();
                             full_cmd_count = 0;
                         }
@@ -169,7 +169,7 @@ pub mod Runner {
                                     }
                                 }
                                 if full_cmd_count > 0 {
-                                    pipe.query::<Value>(&mut target_conn).unwrap();
+                                    let result:RedisResult<Value> = pipe.query_async(&mut target_conn).await;
                                     pipe.clear();
                                     full_cmd_count = 0;
                                 };

@@ -1,10 +1,10 @@
-use redis::{Connection, ConnectionLike, ErrorKind};
+use redis::{Connection, ErrorKind, Cmd, aio, RedisResult, Value};
 
 use std::error::Error;
 
 use std::io::{BufReader, Read, Write};
 
-use crate::utils::conn::open_redis_conn;
+use crate::utils::conn::{open_redis_conn, open_redis_sync_conn};
 use std::sync::atomic::{AtomicPtr, AtomicU64, AtomicUsize, Ordering};
 use tokio::sync::mpsc::channel;
 use std::sync::Arc;
@@ -12,6 +12,7 @@ use async_std::task::{spawn,sleep};
 use std::time::Duration;
 use crate::rdb::loader::Loader;
 use tokio::io::AsyncReadExt;
+use redis::aio::ConnectionLike;
 #[macro_export(atomic_u64_fetch_add)]
 macro_rules! atomic_u64_fetch_add {
     ($data:ident,$inr:expr) => {
@@ -26,9 +27,9 @@ macro_rules! atomic_u64_load {
 }
 macro_rules! send_cmd {
     // 连接，发送的包,发送统计，单次发送的count统计，超过多少就发送的值
-    ($conn:ident,$req_packed:ident,$send_count:ident,$batch_count:ident,$over_max_to_send:expr) => {
+    ($conn:ident,$pipe:ident,$send_count:ident,$batch_count:ident,$over_max_to_send:expr) => {
         if $batch_count > $over_max_to_send {
-            match $conn.req_packed_commands($req_packed.as_slice(), 0, $batch_count) {
+            match $conn.req_packed_commands(&$pipe, 0, $batch_count).await {
                 Ok(_d) => {}
                 Err(e) => match e.kind() {
                     ErrorKind::IoError => {
@@ -41,7 +42,7 @@ macro_rules! send_cmd {
             };
             atomic_u64_fetch_add!($send_count, $batch_count as u64);
             $batch_count = 0;
-            $req_packed.clear();
+            $pipe.clear();
         }
     };
 }
@@ -51,7 +52,7 @@ pub async fn incr(
     target_url: &'static str,
     target_pass: &'static str,
 ) -> Result<(), Box<dyn Error>> {
-    let (mut sender, mut receiver) = channel::<cmd_pack>(20000);
+    let (mut sender, mut receiver) = channel::<Cmd>(20000);
     let send_count = Arc::new(AtomicU64::new(0));
     let send_count_c = send_count.clone();
     let parse_count = Arc::new(AtomicU64::new(0));
@@ -76,24 +77,17 @@ pub async fn incr(
     });
     // 发送
     spawn(async move  {
-        let mut req_packed: Vec<u8> = vec![];
+        let mut pipe= redis::pipe();
         let mut batch_count = 0;
-        let mut conn: Connection;
-        let mut last_select_full_pack = vec![];
+        let mut conn: aio::Connection;
+        let mut last_select_full_pack = redis::Cmd::new();
         loop {
             loop {
                 println!("连接目的端redis中...");
-                conn = match open_redis_conn(target_url, target_pass, "0") {
+                let index = "0";
+                conn = match open_redis_sync_conn(target_url, target_pass, index).await {
                     Ok(mut d) => {
                         // 选择redis的db
-                        if last_select_full_pack.len() != 0 {
-                            match d.send_packed_command(last_select_full_pack.as_ref()) {
-                                Ok(_d1) => {
-                                    print!("重新目的端redis");
-                                }
-                                Err(_e) => continue,
-                            }
-                        }
                         d
                     }
                     Err(_e) => {
@@ -101,28 +95,30 @@ pub async fn incr(
                         continue;
                     }
                 };
+                // todo 判断命令是否为空
+                let result: RedisResult<Value> = last_select_full_pack.query_async(&mut conn).await;
+                match result {
+                    Ok(_d1) => {
+                        print!("重新目的端redis");
+                    }
+                    Err(_e) => continue,
+                }
                 println!("连接成功!");
                 break;
             }
             loop {
                 match receiver.recv().await {
                     Some(mut cmd) => {
-                        // 先查看是不是select
-                        if String::from_utf8_lossy(cmd.cmd.as_ref())
-                            .to_lowercase()
-                            .eq("select")
-                        {
-                            match String::from_utf8(cmd.full_pack.clone()) {
-                                Ok(_d) => last_select_full_pack = cmd.full_pack.clone(),
-                                Err(_e) => println!("select error?"),
-                            }
+                        // todo 记录select命令
+                        if false{
+                            last_select_full_pack = cmd.clone();
                         };
-                        req_packed.append(&mut cmd.full_pack);
+                        pipe.add_command(cmd);
                         batch_count = batch_count + 1;
-                        send_cmd!(conn, req_packed, send_count, batch_count, 300);
+                        send_cmd!(conn, pipe, send_count, batch_count, 300);
                     }
                     None => {
-                        send_cmd!(conn, req_packed, send_count, batch_count, 0);
+                        send_cmd!(conn, pipe, send_count, batch_count, 0);
                     }
                 }
             }
@@ -138,6 +134,7 @@ pub async fn incr(
                 cmd: vec![],
                 full_pack: vec![],
             };
+            let mut cmd = redis::Cmd::new();
             if p[0] == '*' as u8 {
                 pack.full_pack.push(p[0]);
                 let mut args_num_vec = Vec::new();
@@ -187,8 +184,9 @@ pub async fn incr(
                     if i == 0 {
                         p_.pop();
                         p_.pop();
-                        pack.cmd = p_
+                        pack.cmd = p_.clone()
                     }
+                    cmd.arg(p_);
                 }
 
                 // 解析加1
@@ -196,7 +194,7 @@ pub async fn incr(
                 // 统计全部
                 atomic_u64_fetch_add!(count_all_bytes_c, pack.full_pack.len() as u64);
                 // 发送
-                sender.send(pack).await;
+                sender.send(cmd).await;
             } else {
                 print!("{}", p[0] as char);
             }

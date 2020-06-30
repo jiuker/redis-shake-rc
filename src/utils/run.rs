@@ -153,7 +153,7 @@ pub mod Runner {
                         full_cmd_count = full_cmd_count + 1;
                         pipe.add_command(cmd);
                         if full_cmd_count >= 300 {
-                            let result:RedisResult<Value> = pipe.query_async(&mut target_conn).await;
+                            let _:RedisResult<Value> = pipe.query_async(&mut target_conn).await;
                             pipe.clear();
                             full_cmd_count = 0;
                         }
@@ -169,7 +169,7 @@ pub mod Runner {
                                     }
                                 }
                                 if full_cmd_count > 0 {
-                                    let result:RedisResult<Value> = pipe.query_async(&mut target_conn).await;
+                                    let _:RedisResult<Value> = pipe.query_async(&mut target_conn).await;
                                     pipe.clear();
                                     full_cmd_count = 0;
                                 };

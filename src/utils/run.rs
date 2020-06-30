@@ -179,7 +179,6 @@ pub mod Runner {
                                 unimplemented!("RDB channel close!")
                             }
                         }
-
                     }
                 };
             }

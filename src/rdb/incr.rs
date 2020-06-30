@@ -13,6 +13,7 @@ use std::time::Duration;
 use crate::rdb::loader::Loader;
 use tokio::io::AsyncReadExt;
 use redis::aio::ConnectionLike;
+use tokio::sync::mpsc::error::TryRecvError;
 #[macro_export(atomic_u64_fetch_add)]
 macro_rules! atomic_u64_fetch_add {
     ($data:ident,$inr:expr) => {
@@ -96,19 +97,26 @@ pub async fn incr(
                     }
                 };
                 // todo 判断命令是否为空
-                let result: RedisResult<Value> = last_select_full_pack.query_async(&mut conn).await;
-                match result {
-                    Ok(_d1) => {
-                        print!("重新目的端redis");
+                let mut isEmpty = true;
+                for d in last_select_full_pack.args_iter(){
+                    isEmpty = false;
+                    break;
+                };
+                if !isEmpty {
+                    let result: RedisResult<Value> = last_select_full_pack.query_async(&mut conn).await;
+                    match result {
+                        Ok(_d1) => {
+                            print!("重新目的端redis");
+                        }
+                        Err(_e) => continue,
                     }
-                    Err(_e) => continue,
                 }
                 println!("连接成功!");
                 break;
             }
             loop {
-                match receiver.recv().await {
-                    Some(mut cmd) => {
+                match receiver.try_recv() {
+                    Ok(mut cmd) => {
                         // todo 记录select命令
                         if false{
                             last_select_full_pack = cmd.clone();
@@ -117,8 +125,16 @@ pub async fn incr(
                         batch_count = batch_count + 1;
                         send_cmd!(conn, pipe, send_count, batch_count, 300);
                     }
-                    None => {
-                        send_cmd!(conn, pipe, send_count, batch_count, 0);
+                    Err(e) => {
+                        match e {
+                            TryRecvError::Empty=>{
+                                send_cmd!(conn, pipe, send_count, batch_count, 0);
+                                sleep(Duration::from_millis(100)).await;
+                            },
+                            TryRecvError::Closed=>{
+                                break;
+                            }
+                        }
                     }
                 }
             }
@@ -181,9 +197,9 @@ pub async fn incr(
                     let mut p_: Vec<u8> = vec![0; (args_num + 2) as usize];
                     loader.rdbReader.raw.borrow_mut().read_exact(&mut p_).await.unwrap();
                     pack.full_pack.append(p_.clone().as_mut());
+                    p_.pop();
+                    p_.pop();
                     if i == 0 {
-                        p_.pop();
-                        p_.pop();
                         pack.cmd = p_.clone()
                     }
                     cmd.arg(p_);

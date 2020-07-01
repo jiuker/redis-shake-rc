@@ -80,7 +80,7 @@ pub mod Runner {
             loop {
                 let ird = atomic_u64_load!(rdb_status);
                 if ird!=2 {
-                    yield_now().await;
+                    sleep(Duration::from_millis(100)).await;
                 } else {
                     break;
                 }
@@ -186,7 +186,7 @@ pub mod Runner {
         loop {
             let ird = atomic_u64_load!(rdb_status_c1);
             if ird!=2 {
-                yield_now().await;
+                sleep(Duration::from_millis(100)).await;
             } else {
                 break;
             }

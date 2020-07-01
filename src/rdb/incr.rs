@@ -119,7 +119,7 @@ pub async fn incr(
                         };
                         pipe.add_command(pack.cmd);
                         batch_count = batch_count + 1;
-                        send_cmd!(conn, pipe, send_count, batch_count, 300);
+                        send_cmd!(conn, pipe, send_count, batch_count, 1000);
                     }
                     Err(e) => {
                         match e {

@@ -53,7 +53,7 @@ pub async fn incr(
     target_url: &'static str,
     target_pass: &'static str,
 ) -> Result<(), Box<dyn Error>> {
-    let (mut sender, mut receiver) = channel::<Cmd>(20000);
+    let (mut sender, mut receiver) = channel::<cmd_pack>(20000);
     let send_count = Arc::new(AtomicU64::new(0));
     let send_count_c = send_count.clone();
     let parse_count = Arc::new(AtomicU64::new(0));
@@ -96,7 +96,6 @@ pub async fn incr(
                         continue;
                     }
                 };
-                // todo 判断命令是否为空
                 let mut isEmpty = true;
                 for d in last_select_full_pack.args_iter(){
                     isEmpty = false;
@@ -116,12 +115,11 @@ pub async fn incr(
             }
             loop {
                 match receiver.try_recv() {
-                    Ok(mut cmd) => {
-                        // todo 记录select命令
-                        if false{
-                            last_select_full_pack = cmd.clone();
+                    Ok(mut pack) => {
+                        if pack.cmd_name=="select".as_bytes().to_vec(){
+                            last_select_full_pack = pack.cmd.clone();
                         };
-                        pipe.add_command(cmd);
+                        pipe.add_command(pack.cmd);
                         batch_count = batch_count + 1;
                         send_cmd!(conn, pipe, send_count, batch_count, 300);
                     }
@@ -143,22 +141,21 @@ pub async fn incr(
     // 解包
     loop {
         let mut p = [0; 1];
-        let r_len = loader.rdbReader.raw.borrow_mut().read(&mut p).await.unwrap();
+        let r_len = loader.rdbReader.raw.borrow_mut().read_exact(&mut p).await.unwrap();
         if r_len != 0 {
             // 这里就是一个完整的包体
             let mut pack = cmd_pack {
-                cmd: vec![],
-                full_pack: vec![],
+                cmd: redis::Cmd::new(),
+                cmd_name: vec![],
             };
-            let mut cmd = redis::Cmd::new();
+            let mut bytes_count = 1;
             if p[0] == '*' as u8 {
-                pack.full_pack.push(p[0]);
                 let mut args_num_vec = Vec::new();
                 loop {
                     let mut p_ = [0; 1];
-                    let r_len = loader.rdbReader.raw.borrow_mut().read(&mut p_).await.unwrap();
+                    let r_len = loader.rdbReader.raw.borrow_mut().read_exact(&mut p_).await.unwrap();
                     if r_len != 0 {
-                        pack.full_pack.push(p_[0]);
+                        bytes_count+=r_len;
                         if p_[0] == '\r' as u8 {
                         } else if p_[0] == '\n' as u8 {
                             break;
@@ -176,9 +173,9 @@ pub async fn incr(
                     let mut args_num_vec = Vec::new();
                     loop {
                         let mut p_ = [0; 1];
-                        let r_len = loader.rdbReader.raw.borrow_mut().read(&mut p_).await.unwrap();
+                        let r_len = loader.rdbReader.raw.borrow_mut().read_exact(&mut p_).await.unwrap();
                         if r_len != 0 {
-                            pack.full_pack.push(p_[0]);
+                            bytes_count+=r_len;
                             if p_[0] == '\r' as u8 {
                             } else if p_[0] == '$' as u8 {
                                 args_num_vec.clear();
@@ -194,23 +191,25 @@ pub async fn incr(
                         .unwrap()
                         .parse::<i32>()
                         .unwrap();
-                    let mut p_: Vec<u8> = vec![0; (args_num + 2) as usize];
+                    let mut p_: Vec<u8> = vec![0; args_num as usize];
                     loader.rdbReader.raw.borrow_mut().read_exact(&mut p_).await.unwrap();
-                    pack.full_pack.append(p_.clone().as_mut());
-                    p_.pop();
-                    p_.pop();
+                    bytes_count+=args_num as usize;
                     if i == 0 {
-                        pack.cmd = p_.clone()
+                        pack.cmd_name = p_.clone()
                     }
-                    cmd.arg(p_);
+                    pack.cmd.arg(p_);
+                    // 读取 /r/n
+                    let mut p_: Vec<u8> = vec![0; 2];
+                    loader.rdbReader.raw.borrow_mut().read_exact(&mut p_).await.unwrap();
+                    bytes_count+=2;
                 }
 
                 // 解析加1
                 atomic_u64_fetch_add!(parse_count, 1);
                 // 统计全部
-                atomic_u64_fetch_add!(count_all_bytes_c, pack.full_pack.len() as u64);
+                atomic_u64_fetch_add!(count_all_bytes_c, bytes_count as u64);
                 // 发送
-                sender.send(cmd).await;
+                sender.send(pack).await;
             } else {
                 print!("{}", p[0] as char);
             }
@@ -229,8 +228,8 @@ b
 $1
 c
 */
-#[derive(Debug)]
+#[derive(Clone)]
 pub struct cmd_pack {
-    cmd: Vec<u8>,
-    full_pack: Vec<u8>, // 储存完整的命令包
+    cmd_name: Vec<u8>,
+    cmd: Cmd, // 储存完整的命令包
 }

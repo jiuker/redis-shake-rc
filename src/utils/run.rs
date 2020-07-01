@@ -14,8 +14,7 @@ pub mod Runner {
     use std::rc::Rc;
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::sync::Arc;
-    use async_std::task::sleep;
-    use async_std::task::spawn;
+    use async_std::task::{spawn,sleep,yield_now};
     use std::time::Duration;
     
     
@@ -51,7 +50,6 @@ pub mod Runner {
         let offset_count_c = offset_count.clone();
         // 读取源端数据
         spawn(async move {
-            sleep(Duration::from_secs(1)).await;
             let mut source_c = source.clone();
             source_report_offset!(source_c, offset_count);
             let mut p = [0; 256*1024];
@@ -82,7 +80,7 @@ pub mod Runner {
             loop {
                 let ird = atomic_u64_load!(rdb_status);
                 if ird!=2 {
-                    sleep(Duration::from_millis(100)).await
+                    yield_now().await;
                 } else {
                     break;
                 }
@@ -135,7 +133,7 @@ pub mod Runner {
                 if rrcc >= rdb_size as u64 {
                     break;
                 }
-                sleep(Duration::from_secs(1)).await
+                sleep(Duration::from_secs(1)).await;
             }
         });
         //读取rdb文件的header
@@ -173,7 +171,7 @@ pub mod Runner {
                                     pipe.clear();
                                     full_cmd_count = 0;
                                 };
-                                sleep(Duration::from_millis(100)).await;
+                                yield_now().await;
                             },
                             TryRecvError::Closed=>{
                                 unimplemented!("RDB channel close!")
@@ -188,7 +186,7 @@ pub mod Runner {
         loop {
             let ird = atomic_u64_load!(rdb_status_c1);
             if ird!=2 {
-                sleep(Duration::from_millis(100)).await
+                yield_now().await;
             } else {
                 break;
             }

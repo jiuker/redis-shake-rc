@@ -1,6 +1,6 @@
 use crate::utils::cmd::cmd_to_resp_first_line;
 use net2::TcpStreamExt;
-use redis::{Client, Connection, aio::Connection as AsyncConnection};
+use redis::{Client, aio::Connection};
 
 use std::error::Error;
 use std::ops::Add;
@@ -20,27 +20,12 @@ pub async fn open_tcp_conn(url: &str, pass: &str) ->  Result<TcpStream, Box<dyn 
     };
     Ok(source)
 }
-pub fn open_redis_conn(
-    url: &str,
-    pass: &str,
-    mut index: &'static str,
-) -> Result<Connection, Box<dyn Error>> {
-    if index == "" {
-        index = "0"
-    }
-    let mut path = format!("redis://{}/{}", url, index);
-    if pass != "" {
-        path = path.add(":");
-        path = path.add(pass);
-    }
-    Ok(Client::open(path.as_str())?.get_connection()?)
-}
 
 pub async fn open_redis_sync_conn(
     url: &str,
     pass: &str,
     mut index: &str,
-) -> Result<AsyncConnection, Box<dyn Error>> {
+) -> Result<Connection, Box<dyn Error>> {
     if index == "" {
         index = "0"
     }

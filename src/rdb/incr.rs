@@ -4,7 +4,7 @@ use std::error::Error;
 
 use std::io::{BufReader, Read, Write};
 
-use crate::utils::conn::{open_redis_conn, open_redis_sync_conn};
+use crate::utils::conn::{open_redis_sync_conn};
 use std::sync::atomic::{AtomicPtr, AtomicU64, AtomicUsize, Ordering};
 use tokio::sync::mpsc::channel;
 use std::sync::Arc;

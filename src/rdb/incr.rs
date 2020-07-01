@@ -1,8 +1,6 @@
-use redis::{Connection, ErrorKind, Cmd, aio, RedisResult, Value};
+use redis::{ErrorKind, Cmd, aio, RedisResult, Value};
 
 use std::error::Error;
-
-use std::io::{BufReader, Read, Write};
 
 use crate::utils::conn::{open_redis_sync_conn};
 use std::sync::atomic::{AtomicPtr, AtomicU64, AtomicUsize, Ordering};
@@ -87,7 +85,7 @@ pub async fn incr(
                 println!("连接目的端redis中...");
                 let index = "0";
                 conn = match open_redis_sync_conn(target_url, target_pass, index).await {
-                    Ok(mut d) => {
+                    Ok(d) => {
                         // 选择redis的db
                         d
                     }
@@ -97,7 +95,7 @@ pub async fn incr(
                     }
                 };
                 let mut isEmpty = true;
-                for d in last_select_full_pack.args_iter(){
+                for _d in last_select_full_pack.args_iter(){
                     isEmpty = false;
                     break;
                 };
@@ -115,7 +113,7 @@ pub async fn incr(
             }
             loop {
                 match receiver.try_recv() {
-                    Ok(mut pack) => {
+                    Ok(pack) => {
                         if pack.cmd_name=="select".as_bytes().to_vec(){
                             last_select_full_pack = pack.cmd.clone();
                         };

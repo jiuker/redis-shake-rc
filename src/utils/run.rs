@@ -150,7 +150,7 @@ pub mod Runner {
                     Ok(cmd) => {
                         full_cmd_count = full_cmd_count + 1;
                         pipe.add_command(cmd);
-                        if full_cmd_count >= 1000 {
+                        if full_cmd_count >= 10000 {
                             let _:RedisResult<Value> = pipe.query_async(&mut target_conn).await;
                             pipe.clear();
                             full_cmd_count = 0;

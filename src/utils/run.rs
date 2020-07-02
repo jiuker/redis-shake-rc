@@ -56,7 +56,7 @@ pub mod Runner {
         spawn(async move {
             let mut source_c = source.clone();
             source_report_offset!(source_c, offset_count);
-            let mut p = [0; 256*1024];
+            let mut p = [0; 512*1024];
             // 全量的数据
             loop {
                 let r_len = match source_buf.read(&mut p).await {

@@ -36,7 +36,7 @@ pub mod Runner {
 
         let (offset, rdb_size, uuid) = pre_to_rdb(&mut source).await.unwrap();
 
-        let mut source_buf = AsyncBufReader::with_capacity(0*1024*1024,source.clone());
+        let mut source_buf = AsyncBufReader::with_capacity(10*1024*1024,source.clone());
 
         // 带缓存的管道
         let (mut pipe_writer, pipe_reader) = async_pipe::pipe();

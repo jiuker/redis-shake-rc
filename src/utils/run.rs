@@ -7,8 +7,7 @@ pub mod Runner {
     use crate::{atomic_u64_fetch_add, atomic_u64_load, source_report_offset};
     use redis::{Cmd, Value, RedisResult};
     use std::cell::RefCell;
-    use std::io::{Write};
-    
+
     
     use std::process::exit;
     use std::rc::Rc;

@@ -48,7 +48,7 @@ pub async fn full(
                 };
                 if e.Type == RdbTypeQuicklist {
                     full_cmd_sender.send(redis::cmd("DEL").arg(e.Key.clone()).to_owned()).await;
-                    OverRestoreQuicklistEntry(&e,full_cmd_sender);
+                    OverRestoreQuicklistEntry(&e,full_cmd_sender).await;
                     if e.ExpireAt != 0 {
                         full_cmd_sender.send( redis::cmd("EXPIREAT").arg(e.Key.clone()).arg(e.ExpireAt).to_owned()).await;
                     }
@@ -59,7 +59,7 @@ pub async fn full(
                 } else if e.Type != RDBTypeStreamListPacks
                     && (e.Value.len() >= 10*1024*1024 || e.RealMemberCount != 0)
                 {
-                    OverRestoreBigRdbEntry(&e,full_cmd_sender);
+                    OverRestoreBigRdbEntry(&e,full_cmd_sender).await;
                 } else {
                     let mut ttlms = 0;
                     if e.ExpireAt != 0{

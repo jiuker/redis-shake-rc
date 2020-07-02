@@ -1,5 +1,4 @@
 use crate::utils::cmd::cmd_to_resp_first_line;
-use net2::TcpStreamExt;
 use redis::{Client, aio::Connection};
 
 use std::error::Error;

@@ -250,7 +250,7 @@ macro_rules! read_uint {
         pub async fn $fun_name_uint(&mut self) -> Result<$result_type, Box<dyn Error>> {
             let mut p: Vec<u8> = vec![0; $n];
             self.raw.borrow_mut().read_exact(p.as_mut()).await?;
-            self.crc64.write_all(p.to_vec().as_slice());
+            self.crc64.write_all(p.to_vec().as_slice())?;
             if self.is_cache_buf {
                 self.buf.append(p.to_vec().as_mut());
             }
@@ -266,7 +266,7 @@ macro_rules! read_uint_big {
          pub async fn $fun_name(&mut self) -> Result<u32, Box<dyn Error>> {
             let mut p = [0 as u8; $n];
             self.raw.borrow_mut().read_exact(p.as_mut()).await?;
-            self.crc64.write_all(p.to_vec().as_slice());
+            self.crc64.write_all(p.to_vec().as_slice())?;
             if self.is_cache_buf {
                 self.buf.append(p.to_vec().as_mut());
             }
@@ -354,7 +354,7 @@ impl rdbReader {
     pub async fn ReadZiplistEntry(&mut self, buf: &mut sliceBuffer) -> Result<Vec<u8>, Box<dyn Error>> {
         let prevLen = buf.ReadByte()?;
         if prevLen == 254 {
-            buf.Seek(4, 1); // skip the 4-byte prevlen
+            buf.Seek(4, 1)?; // skip the 4-byte prevlen
         };
         let header = buf.ReadByte()?;
         if (header >> 6) as u8 == rdbZiplist6bitlenString {
@@ -382,7 +382,7 @@ impl rdbReader {
         }
         if header == rdbZiplistInt24 as u8 {
             let intBytes_ = [0 as u8; 3];
-            buf.Read(&mut intBytes_.to_vec());
+            buf.Read(&mut intBytes_.to_vec())?;
             let mut intBytes = [0 as u8;4];
             let mut index = 0;
             for _ in intBytes_.iter(){
@@ -401,14 +401,14 @@ impl rdbReader {
         Err(Box::from("rdb: unknown ziplist header byte"))
     }
     pub async fn ReadZiplistLength(&mut self, buf: &mut sliceBuffer) -> Result<i64, Box<dyn Error>> {
-        buf.Seek(8, 0); // skip the zlbytes and zltail
+        buf.Seek(8, 0)?; // skip the zlbytes and zltail
         let lenBytes = buf.Slice(2)?;
         Ok(self.u16(lenBytes.as_slice()) as i64)
     }
     pub async fn ReadByte(&mut self) -> Result<u8, Box<dyn Error>> {
         let mut p = [0 as u8; 1];
         self.raw.borrow_mut().read_exact(p.as_mut()).await?;
-        self.crc64.write_all(p.to_vec().as_slice());
+        self.crc64.write_all(p.to_vec().as_slice())?;
         if self.is_cache_buf{
             self.buf.append(p.to_vec().as_mut());
         }
@@ -487,7 +487,7 @@ impl rdbReader {
     pub async fn ReadBytes(&mut self, n: usize) -> Result<Vec<u8>, Box<dyn Error>> {
         let mut p: Vec<u8> = vec![0; n];
         self.raw.borrow_mut().read_exact(&mut p).await?;
-        self.crc64.write_all(p.to_vec().as_slice());
+        self.crc64.write_all(p.to_vec().as_slice())?;
         if self.is_cache_buf{
             self.buf.append(p.clone().as_mut());
         }
@@ -517,7 +517,7 @@ impl rdbReader {
     pub async fn ReadDouble(&mut self) -> Result<f64, Box<dyn Error>> {
         let mut p = [0 as u8; 8];
         self.raw.borrow_mut().read_exact(p.as_mut()).await?;
-        self.crc64.write_all(p.to_vec().as_slice());
+        self.crc64.write_all(p.to_vec().as_slice())?;
         if self.is_cache_buf {
             self.buf.append(p.to_vec().as_mut());
         }
@@ -630,7 +630,7 @@ impl rdbReader {
                         // pending
                         let nPending2 = lr.ReadLength().await?;
                         for _ in 0..nPending2 {
-                            lr.ReadBytes(16);
+                            lr.ReadBytes(16).await;
                         }
                     }
                 }
@@ -728,9 +728,9 @@ pub fn createValueDump(t: u8, val: Vec<u8>) -> Vec<u8> {
     let mut wtr = vec![];
     let mut crc = Crc64::new();
     wtr.push(t);
-    crc.write_u8(t);
+    crc.write_u8(t).unwrap();
     wtr.append(&mut val.clone());
-    crc.write(val.as_slice());
+    crc.write(val.as_slice()).unwrap();
     wtr.write_u16::<LittleEndian>(6 as u16).unwrap();
     crc.write_u16::<LittleEndian>(6 as u16).unwrap();
     wtr.write_u64::<LittleEndian>(crc.get()).unwrap();

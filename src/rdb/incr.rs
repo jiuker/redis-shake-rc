@@ -3,7 +3,7 @@ use redis::{ErrorKind, Cmd, aio, RedisResult, Value};
 use std::error::Error;
 
 use crate::utils::conn::{open_redis_sync_conn};
-use std::sync::atomic::{AtomicPtr, AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use tokio::sync::mpsc::channel;
 use std::sync::Arc;
 use async_std::task::{spawn,sleep};
@@ -82,6 +82,7 @@ pub async fn incr(
         let mut last_select_full_pack = redis::Cmd::new();
         loop {
             loop {
+                sleep(Duration::from_secs(1)).await;
                 println!("连接目的端redis中...");
                 let index = "0";
                 conn = match open_redis_sync_conn(target_url, target_pass, index).await {
@@ -90,7 +91,6 @@ pub async fn incr(
                         d
                     }
                     Err(_e) => {
-                        sleep(Duration::from_secs(1));
                         continue;
                     }
                 };

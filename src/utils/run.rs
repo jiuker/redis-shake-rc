@@ -24,7 +24,7 @@ pub mod Runner {
     use tokio::io::{AsyncWriteExt, BufReader};
     use tokio::sync::mpsc::channel;
     use tokio::sync::mpsc::error::TryRecvError;
-    use async_std::io::{BufWriter,BufReader as AsyncBufReader};
+    use async_std::io::{BufReader as AsyncBufReader};
 
     pub async fn mod_full(
         source_url: &'static str,

@@ -24,6 +24,7 @@ pub mod Runner {
     use tokio::io::{AsyncWriteExt, BufReader};
     use tokio::sync::mpsc::channel;
     use tokio::sync::mpsc::error::TryRecvError;
+    use async_std::io::{BufWriter,BufReader as AsyncBufReader};
 
     pub async fn mod_full(
         source_url: &'static str,
@@ -32,7 +33,10 @@ pub mod Runner {
         target_pass: &'static str,
     ) {
         let mut source = open_tcp_conn(source_url, source_pass).await.unwrap();
+
         let (offset, rdb_size, uuid) = pre_to_rdb(&mut source).await.unwrap();
+
+        let mut source_buf = AsyncBufReader::with_capacity(0*1024*1024,source.clone());
 
         // 带缓存的管道
         let (mut pipe_writer, pipe_reader) = async_pipe::pipe();
@@ -55,7 +59,7 @@ pub mod Runner {
             let mut p = [0; 256*1024];
             // 全量的数据
             loop {
-                let r_len = match source.read(&mut p).await {
+                let r_len = match source_buf.read(&mut p).await {
                     Ok(d) => d,
                     Err(e) => {
                         println!("source tcp error {}", e);
@@ -87,7 +91,7 @@ pub mod Runner {
             }
             println!("开始读取增量!");
             loop {
-                let r_len = match source.read(&mut p).await {
+                let r_len = match source_buf.read(&mut p).await {
                     Ok(d) => d,
                     Err(e) => {
                         println!("source tcp error {}", e);
@@ -106,7 +110,6 @@ pub mod Runner {
                             continue
                         },
                     };
-                    source = re_connect_conn;
                     match pre_to_inc(
                         &mut source,
                         uuid.as_ref(),
@@ -122,6 +125,7 @@ pub mod Runner {
                             exit(1);
                         }
                     };
+                    source_buf = AsyncBufReader::with_capacity(10*1024*1024,re_connect_conn);
                 }
             }
         });

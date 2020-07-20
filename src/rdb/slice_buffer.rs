@@ -39,7 +39,7 @@ impl sliceBuffer {
         if self.i >= self.s.len() as i32 {
             return Err(Box::from("io error"));
         };
-        let mut index = 0 as usize;
+        let mut index = 0usize;
         while index < p.len() {
             let p = p.get_mut(index).unwrap();
             *p = *self.s.get(index + self.i as usize).unwrap();
